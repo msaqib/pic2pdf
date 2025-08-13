@@ -9,7 +9,7 @@ from ..models.image_manager import ImageManager
 from .home_screen import HomeScreen
 from .preview_screen import PreviewScreen
 from .image_viewer import ImageViewer
-from ..utils.pdf_creator import PDFCreator
+from ..utils.pdf_creator import PDFQualityPresets
 from ..utils.progress_dialog import ProgressDialog
 
 class MainWindow:
@@ -121,7 +121,7 @@ class MainWindow:
             """Task to create PDF in background."""
             try:
                 images = self.image_manager.get_images()
-                pdf_creator = PDFCreator()
+                pdf_creator = PDFQualityPresets.print_quality()
                 pdf_creator.create_pdf(images, filename)
                 return True, "PDF created successfully!"
             except Exception as e:
