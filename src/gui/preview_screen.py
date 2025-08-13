@@ -10,7 +10,7 @@ import os
 class PreviewScreen:
     """Preview screen that displays selected images and allows reordering."""
     
-    def __init__(self, parent, on_select_files, on_create_pdf, on_view_image, on_delete_images, on_reorder_images=None):
+    def __init__(self, parent, on_select_files, on_create_pdf, on_view_image, on_delete_images, debug, on_reorder_images=None):
         """Initialize the preview screen."""
         self.parent = parent
         self.on_select_files = on_select_files
@@ -22,7 +22,8 @@ class PreviewScreen:
         self.images = []
         self.thumbnails = []
         self.selected_indices = set()
-        
+        self.debug = debug
+                
         # Drag and drop state
         self.drag_start_index = None
         self.drag_start_y = None
@@ -127,7 +128,7 @@ class PreviewScreen:
                     photo = ImageTk.PhotoImage(img)
                     self.thumbnails.append(photo)
             except Exception as e:
-                print(f"Error creating thumbnail for {img_path}: {e}")
+                self.debug.info(f"Error creating thumbnail for {img_path}: {e}")
                 # Create a placeholder
                 placeholder_img = Image.new('RGB', (150, 150), color='lightgray')
                 photo = ImageTk.PhotoImage(placeholder_img)
@@ -135,7 +136,7 @@ class PreviewScreen:
                 
     def refresh_display(self):
         """Refresh the image display."""
-        print(f"Refreshing display. Images: {len(self.images)}, Selected: {self.selected_indices}")
+        self.debug.info(f"Refreshing display. Images: {len(self.images)}, Selected: {self.selected_indices}")
         
         # Clear existing widgets
         for widget in self.scrollable_frame.winfo_children():
@@ -144,12 +145,12 @@ class PreviewScreen:
             
         # Create image frames
         for i, (img_path, thumbnail) in enumerate(zip(self.images, self.thumbnails)):
-            print(f"Creating frame {i} for {os.path.basename(img_path)}")
+            self.debug.info(f"Creating frame {i} for {os.path.basename(img_path)}")
             frame = self.create_image_frame(i, img_path, thumbnail)
             frame.pack(fill='x', padx=5, pady=2)
             self.image_frames.append(frame)
             
-        print(f"Created {len(self.image_frames)} frames")
+        self.debug.info(f"Created {len(self.image_frames)} frames")
         
         # Update canvas scroll region
         self.scrollable_frame.update_idletasks()
@@ -235,7 +236,7 @@ class PreviewScreen:
     
     def on_mouse_press(self, event, index):
         """Handle mouse press."""
-        print(f"Mouse press on frame {index}")
+        self.debug.info(f"Mouse press on frame {index}")
         
         # Store drag start information
         self.drag_start_index = index
@@ -277,7 +278,7 @@ class PreviewScreen:
     def start_drag(self, index):
         """Start the drag operation."""
         self.is_dragging = True
-        print(f"Started dragging frame {index}")
+        self.debug.info(f"Started dragging frame {index}")
         
         # Change cursor for all frames
         for frame in self.image_frames:
@@ -310,10 +311,10 @@ class PreviewScreen:
             target_index = self.find_target_index(event.y_root)
             
             if target_index is not None and target_index != self.drag_start_index:
-                print(f"Dropping frame {self.drag_start_index} at position {target_index}")
+                self.debug.info(f"Dropping frame {self.drag_start_index} at position {target_index}")
                 self.reorder_images(self.drag_start_index, target_index)
             else:
-                print("Drag cancelled or dropped at same position")
+                self.debug.info("Drag cancelled or dropped at same position")
         
         # Reset drag state
         self.end_drag()
@@ -363,7 +364,7 @@ class PreviewScreen:
             return len(self.image_frames) - 1
             
         except Exception as e:
-            print(f"Error finding target index: {e}")
+            self.debug.info(f"Error finding target index: {e}")
             return None
     
     def on_mouse_enter(self, event, index):
@@ -393,10 +394,10 @@ class PreviewScreen:
     def update_selection_display(self):
         """Update the visual display of selections."""
         if self.selected_indices:
-            print('Enabling delete button')
+            self.debug.info('Enabling delete button')
             self.delete_button['state'] = 'normal' 
         else:
-            print('Disabling delete button')
+            self.debug.info('Disabling delete button')
             self.delete_button['state'] = 'disabled'
         for i, frame in enumerate(self.image_frames):
             if i in self.selected_indices:
@@ -408,17 +409,17 @@ class PreviewScreen:
     
     def toggle_selection(self, index):
         """Toggle selection of an image."""
-        print(f"Toggling selection for index {index}")
+        self.debug.info(f"Toggling selection for index {index}")
         if index in self.selected_indices:
             self.selected_indices.remove(index)
         else:
             self.selected_indices.add(index)
 
-        print(f"New selection: {self.selected_indices}")
+        self.debug.info(f"New selection: {self.selected_indices}")
     
     def reorder_images(self, from_index, to_index):
         """Reorder images by moving from_index to to_index."""
-        print(f"Reordering: moving item {from_index} to position {to_index}")
+        self.debug.info(f"Reordering: moving item {from_index} to position {to_index}")
         
         if from_index == to_index or from_index < 0 or to_index < 0:
             return
@@ -450,7 +451,7 @@ class PreviewScreen:
                     new_selected.add(idx)
         self.selected_indices = new_selected
         
-        print(f"Reorder complete. New selection: {self.selected_indices}")
+        self.debug.info(f"Reorder complete. New selection: {self.selected_indices}")
         if self.on_reorder_images:
             self.on_reorder_images(self.images.copy())
         self.refresh_display()

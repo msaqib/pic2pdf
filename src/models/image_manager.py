@@ -5,14 +5,15 @@ Image Data Management for Image to PDF Converter
 class ImageManager:
     """Manages the list of selected images and their ordering."""
     
-    def __init__(self):
+    def __init__(self, debug):
         """Initialize the image manager."""
         self.images = []
+        self.debug = debug
         
     def set_images(self, image_paths):
         """Set the list of images."""
         for i, img in enumerate(image_paths):
-            print(f"Image manager: Image {i} is {img}")
+            self.debug.info(f"Image manager: Image {i} is {img}")
         self.images = list(image_paths)
         
     def get_images(self):
@@ -35,7 +36,7 @@ class ImageManager:
         # Move the image
         item = self.images.pop(from_index)
         self.images.insert(to_index, item)
-        print(f"ImageManager: Moved image from position {from_index} to {to_index}")
+        self.debug.info(f"ImageManager: Moved image from position {from_index} to {to_index}")
 
     def add_image(self, image_path):
         """Add a single image to the list."""

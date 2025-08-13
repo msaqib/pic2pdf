@@ -8,7 +8,7 @@ import os
 class PDFCreator:
     """Utility class for creating high-quality PDF files from images."""
     
-    def __init__(self, dpi=300, quality=95):
+    def __init__(self, debug, dpi=300, quality=95):
         """
         Initialize the PDF creator with high-quality settings.
         
@@ -30,6 +30,7 @@ class PDFCreator:
         self.margin = int(0.5 * dpi)
         self.content_width = self.page_width - (2 * self.margin)
         self.content_height = self.page_height - (2 * self.margin)
+        self.debug = debug
         
     def create_pdf(self, image_paths, output_path, fit_mode='fit', preserve_aspect=True):
         """
@@ -56,8 +57,8 @@ class PDFCreator:
                 
             try:
                 with Image.open(img_path) as img:
-                    print(f"Processing image {i+1}/{len(image_paths)}: {os.path.basename(img_path)}")
-                    print(f"Original size: {img.size}, Mode: {img.mode}")
+                    self.debug.info(f"Processing image {i+1}/{len(image_paths)}: {os.path.basename(img_path)}")
+                    self.debug.info(f"Original size: {img.size}, Mode: {img.mode}")
                     
                     # Convert to RGB if necessary (for JPEG compatibility in PDF)
                     if img.mode in ('RGBA', 'LA', 'P'):
@@ -78,7 +79,7 @@ class PDFCreator:
                     else:  # fit mode
                         img_processed = self.resize_to_fit_page(img, preserve_aspect)
                     
-                    print(f"Processed size: {img_processed.size}")
+                    self.debug.info(f"Processed size: {img_processed.size}")
                     processed_images.append(img_processed)
                     
             except Exception as e:
@@ -87,7 +88,7 @@ class PDFCreator:
         # Create PDF with high quality settings
         if processed_images:
             try:
-                print(f"Creating PDF with {self.dpi} DPI, quality {self.quality}")
+                self.debug.info(f"Creating PDF with {self.dpi} DPI, quality {self.quality}")
                 
                 # Save as PDF with high quality settings
                 processed_images[0].save(
@@ -100,7 +101,7 @@ class PDFCreator:
                     optimize=False  # Don't optimize to maintain quality
                 )
                 
-                print(f"PDF created successfully: {output_path}")
+                self.debug.info(f"PDF created successfully: {output_path}")
                 
             except Exception as e:
                 raise Exception(f"Error creating PDF: {str(e)}")
@@ -138,7 +139,7 @@ class PDFCreator:
         if (new_width, new_height) != (img_width, img_height):
             # Use high-quality resampling
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            print(f"Resized from {img_width}x{img_height} to {new_width}x{new_height}")
+            self.debug.info(f"Resized from {img_width}x{img_height} to {new_width}x{new_height}")
         
         return image
     
@@ -177,7 +178,7 @@ class PDFCreator:
                 bottom = top + self.content_height
                 
                 image = image.crop((left, top, right, bottom))
-                print(f"Cropped to {image.size}")
+                self.debug.info(f"Cropped to {image.size}")
         else:
             # Stretch to fill exactly
             image = image.resize((self.content_width, self.content_height), Image.Resampling.LANCZOS)
@@ -197,7 +198,7 @@ class PDFCreator:
         self.margin = int(0.5 * dpi)
         self.content_width = self.page_width - (2 * self.margin)
         self.content_height = self.page_height - (2 * self.margin)
-        print(f"DPI set to {dpi}, page size: {self.page_width}x{self.page_height}")
+        self.debug.info(f"DPI set to {dpi}, page size: {self.page_width}x{self.page_height}")
     
     def set_quality(self, quality):
         """
@@ -207,7 +208,7 @@ class PDFCreator:
             quality (int): Quality value (1-100, 95+ for high quality)
         """
         self.quality = max(1, min(100, quality))
-        print(f"Quality set to {self.quality}")
+        self.debug.info(f"Quality set to {self.quality}")
     
     def set_margins(self, margin_inches):
         """
@@ -219,7 +220,7 @@ class PDFCreator:
         self.margin = int(margin_inches * self.dpi)
         self.content_width = self.page_width - (2 * self.margin)
         self.content_height = self.page_height - (2 * self.margin)
-        print(f"Margins set to {margin_inches} inches ({self.margin} pixels)")
+        self.debug.info(f"Margins set to {margin_inches} inches ({self.margin} pixels)")
         
     def get_page_dimensions(self):
         """Get the page dimensions used for PDF creation."""
@@ -246,7 +247,7 @@ class PDFCreator:
         self.page_height = int(height_inches * self.dpi)
         self.content_width = self.page_width - (2 * self.margin)
         self.content_height = self.page_height - (2 * self.margin)
-        print(f"Page size set to {width_inches}×{height_inches} inches")
+        self.debug.info(f"Page size set to {width_inches}×{height_inches} inches")
 
 
 # Preset configurations for different quality levels
@@ -259,9 +260,9 @@ class PDFQualityPresets:
         return PDFCreator(dpi=150, quality=85)
     
     @staticmethod
-    def print_quality():
+    def print_quality(debug):
         """Settings optimized for printing (high quality)."""
-        return PDFCreator(dpi=300, quality=95)
+        return PDFCreator(debug, dpi=300, quality=95)
     
     @staticmethod
     def archive_quality():

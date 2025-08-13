@@ -8,9 +8,9 @@ class AppConfig:
     """Application configuration settings."""
     
     # Application metadata
-    APP_NAME = "Image to PDF Converter"
+    APP_NAME = "Image(s) to PDF Converter"
     VERSION = "1.0.0"
-    AUTHOR = "Your Name"
+    AUTHOR = "Muhammad Saqib Ilyas"
     
     # Supported image formats
     SUPPORTED_FORMATS = {
@@ -50,6 +50,8 @@ class AppConfig:
     
     # Theme settings
     THEME = 'clam'  # tkinter theme
+
+    DEBUG = False
     
     @classmethod
     def get_supported_extensions(cls):

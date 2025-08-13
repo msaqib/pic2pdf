@@ -11,8 +11,9 @@ from .utils.config import AppConfig
 class ImageToPDFApp:
     """Main application class that manages the GUI and application state."""
     
-    def __init__(self):
+    def __init__(self, debug):
         """Initialize the application."""
+        self.debug = debug
         self.root = tk.Tk()
         self.setup_app()
         
@@ -27,7 +28,7 @@ class ImageToPDFApp:
         style.theme_use('clam')  # Use a modern theme
         
         # Initialize main window
-        self.main_window = MainWindow(self.root)
+        self.main_window = MainWindow(self.root, self.debug)
         
     def run(self):
         """Run the application main loop."""
