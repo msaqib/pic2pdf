@@ -1,7 +1,7 @@
 """
 Main Application Class for Image to PDF Converter
 """
-
+from customtkinter import * 
 import tkinter as tk
 from tkinter import ttk
 import os
@@ -14,7 +14,9 @@ class ImageToPDFApp:
     def __init__(self, debug):
         """Initialize the application."""
         self.debug = debug
-        self.root = tk.Tk()
+        # self.root = tk.Tk()
+        self.root = CTk()
+        self.root.configure(bg_color="#F5F6FA")
         self.setup_app()
         
     def setup_app(self):
