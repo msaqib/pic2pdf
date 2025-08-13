@@ -11,12 +11,32 @@ class ImageManager:
         
     def set_images(self, image_paths):
         """Set the list of images."""
+        for i, img in enumerate(image_paths):
+            print(f"Image manager: Image {i} is {img}")
         self.images = list(image_paths)
         
     def get_images(self):
         """Get the current list of images."""
         return self.images.copy()
         
+    def reorder_images(self, from_index, to_index):
+        """
+        Reorder images by moving an image from one position to another.
+        
+        Args:
+            from_index (int): Source index
+            to_index (int): Destination index
+        """
+        if (from_index < 0 or from_index >= len(self.images) or 
+            to_index < 0 or to_index >= len(self.images) or
+            from_index == to_index):
+            return
+        
+        # Move the image
+        item = self.images.pop(from_index)
+        self.images.insert(to_index, item)
+        print(f"ImageManager: Moved image from position {from_index} to {to_index}")
+
     def add_image(self, image_path):
         """Add a single image to the list."""
         if image_path not in self.images:

@@ -28,7 +28,8 @@ class MainWindow:
             self.on_select_files,
             self.on_create_pdf,
             self.on_view_image,
-            self.on_delete_images
+            self.on_delete_images,
+            self.on_reorder_images
         )
         self.image_viewer = None
         
@@ -97,13 +98,36 @@ class MainWindow:
                 self.show_preview_screen()
             else:
                 self.show_home_screen()
-                
+    def on_reorder_images(self, reordered_images):
+        """
+        Handle image reordering from the preview screen.
+        
+        Args:
+            reordered_images (list): List of image paths in the new order
+        """
+        print(f"Main window received reorder notification: {len(reordered_images)} images")
+        print(f"New order: {[os.path.basename(img) for img in reordered_images]}")
+        
+        # Update the ImageManager with the new order
+        self.image_manager.set_images(reordered_images)
+        
+        # Verify the order was updated correctly
+        current_images = self.image_manager.get_images()
+        print(f"ImageManager updated. Current order: {[os.path.basename(img) for img in current_images]}")
+
+
     def on_create_pdf(self):
         """Handle PDF creation."""
         if not self.image_manager.has_images():
             messagebox.showwarning("No Images", "Please select some images first.")
             return
             
+        # Get the current image order from ImageManager
+        images = self.image_manager.get_images()
+        print(f"Creating PDF with {len(images)} images in this order:")
+        for i, img in enumerate(images, 1):
+            print(f"  {i}. {os.path.basename(img)}")
+
         # Get save location
         filename = filedialog.asksaveasfilename(
             title="Save PDF As",
@@ -120,7 +144,7 @@ class MainWindow:
         def create_pdf_task():
             """Task to create PDF in background."""
             try:
-                images = self.image_manager.get_images()
+                #images = self.image_manager.get_images()
                 pdf_creator = PDFQualityPresets.print_quality()
                 pdf_creator.create_pdf(images, filename)
                 return True, "PDF created successfully!"

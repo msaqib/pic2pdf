@@ -10,13 +10,14 @@ import os
 class PreviewScreen:
     """Preview screen that displays selected images and allows reordering."""
     
-    def __init__(self, parent, on_select_files, on_create_pdf, on_view_image, on_delete_images):
+    def __init__(self, parent, on_select_files, on_create_pdf, on_view_image, on_delete_images, on_reorder_images=None):
         """Initialize the preview screen."""
         self.parent = parent
         self.on_select_files = on_select_files
         self.on_create_pdf = on_create_pdf
         self.on_view_image = on_view_image
         self.on_delete_images = on_delete_images
+        self.on_reorder_images = on_reorder_images
         self.frame = None
         self.images = []
         self.thumbnails = []
@@ -55,7 +56,7 @@ class PreviewScreen:
             toolbar,
             text="Create PDF...",
             command=self.on_create_pdf,
-            style='Accent.TButton'
+            style='Accent.TButton',
         )
         pdf_button.pack(side='right')
         
@@ -64,9 +65,10 @@ class PreviewScreen:
             toolbar,
             text="Delete Selected",
             command=self.delete_selected,
-            state='normal'
+            state='disabled',            
         )
         delete_button.pack(side='right', padx=(0, 10))
+        self.delete_button = delete_button
         
         # Main content area
         content_frame = ttk.Frame(self.frame)
@@ -188,9 +190,9 @@ class PreviewScreen:
         name_label.pack(fill='x', anchor='w')
         
         # File path
-        path_label = tk.Label(info_frame, text=img_path, font=('Arial', 8), 
-                             fg='gray', bg=frame['bg'], anchor='w', justify='left')
-        path_label.pack(fill='x', anchor='w')
+        # path_label = tk.Label(info_frame, text=img_path, font=('Arial', 8), 
+        #                      fg='gray', bg=frame['bg'], anchor='w', justify='left')
+        # path_label.pack(fill='x', anchor='w')
         
         # Position indicator
         pos_label = tk.Label(info_frame, text=f"Position: {index + 1}", font=('Arial', 8), 
@@ -390,6 +392,12 @@ class PreviewScreen:
             
     def update_selection_display(self):
         """Update the visual display of selections."""
+        if self.selected_indices:
+            print('Enabling delete button')
+            self.delete_button['state'] = 'normal' 
+        else:
+            print('Disabling delete button')
+            self.delete_button['state'] = 'disabled'
         for i, frame in enumerate(self.image_frames):
             if i in self.selected_indices:
                 frame.configure(bg='lightblue', highlightbackground='blue', highlightthickness=2)
@@ -405,6 +413,7 @@ class PreviewScreen:
             self.selected_indices.remove(index)
         else:
             self.selected_indices.add(index)
+
         print(f"New selection: {self.selected_indices}")
     
     def reorder_images(self, from_index, to_index):
@@ -442,6 +451,8 @@ class PreviewScreen:
         self.selected_indices = new_selected
         
         print(f"Reorder complete. New selection: {self.selected_indices}")
+        if self.on_reorder_images:
+            self.on_reorder_images(self.images.copy())
         self.refresh_display()
         
     def delete_selected(self):
