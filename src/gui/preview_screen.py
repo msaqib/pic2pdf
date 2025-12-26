@@ -4,7 +4,7 @@ Preview Screen UI for Image to PDF Converter
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 import os
 
 class PreviewScreen:
@@ -122,6 +122,8 @@ class PreviewScreen:
         for img_path in self.images:
             try:
                 with Image.open(img_path) as img:
+                    # Apply EXIF orientation to display image correctly
+                    img = ImageOps.exif_transpose(img)
                     # Create thumbnail
                     img.thumbnail((150, 150), Image.Resampling.LANCZOS)
                     # Convert to PhotoImage

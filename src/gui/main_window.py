@@ -69,8 +69,8 @@ class MainWindow:
         )
         
         if filenames:
-            # Sort files by creation time to ensure consistent ordering
-            sorted_files = sorted(filenames, key=lambda x: os.path.getctime(x))
+            # Sort files by filename to match Windows Explorer order
+            sorted_files = sorted(filenames, key=lambda x: os.path.basename(x).lower())
             self.image_manager.set_images(sorted_files)
             self.show_preview_screen()
             

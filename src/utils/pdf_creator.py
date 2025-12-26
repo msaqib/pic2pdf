@@ -2,7 +2,7 @@
 PDF Creation Utility for Image to PDF Converter - High Resolution Version
 """
 
-from PIL import Image
+from PIL import Image, ImageOps
 import os
 
 class PDFCreator:
@@ -57,6 +57,8 @@ class PDFCreator:
                 
             try:
                 with Image.open(img_path) as img:
+                    # Apply EXIF orientation to display image correctly
+                    img = ImageOps.exif_transpose(img)
                     self.debug.info(f"Processing image {i+1}/{len(image_paths)}: {os.path.basename(img_path)}")
                     self.debug.info(f"Original size: {img.size}, Mode: {img.mode}")
                     
