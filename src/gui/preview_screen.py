@@ -1,11 +1,48 @@
 """
 Preview Screen UI for Image to PDF Converter
 """
-# This is a comment
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk, ImageOps
 import os
+
+class ToolTip:
+    """Tooltip widget for displaying file information on hover."""
+    
+    def __init__(self, widget, text_func):
+        self.widget = widget
+        self.text_func = text_func
+        self.tipwindow = None
+        self.id = None
+        self.x = self.y = 0
+        
+    def showtip(self):
+        """Display text in tooltip window."""
+        text = self.text_func()
+        if not text:
+            return
+            
+        self.x, self.y, cx, cy = self.widget.bbox("insert") if hasattr(self.widget, 'bbox') else (0, 0, 0, 0)
+        self.x += self.widget.winfo_rootx() + 25
+        self.y += self.widget.winfo_rooty() + 20
+        
+        self.tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry("+%d+%d" % (self.x, self.y))
+        
+        label = tk.Label(tw, text=text, justify='left',
+                        background="#ffffe0", relief='solid', borderwidth=1,
+                        font=("tahoma", "8", "normal"), wraplength=400)
+        label.pack(ipadx=1)
+        
+    def hidetip(self):
+        """Hide tooltip window."""
+        tw = self.tipwindow
+        self.tipwindow = None
+        if tw:
+            tw.destroy()
+
 
 class PreviewScreen:
     """Preview screen that displays selected images and allows reordering."""
@@ -21,19 +58,35 @@ class PreviewScreen:
         self.frame = None
         self.images = []
         self.thumbnails = []
+        self.grid_thumbnails = []  # Smaller thumbnails for grid
         self.selected_indices = set()
+        self.selected_index = None  # Currently selected single file for preview
         self.debug = debug
                 
         # Drag and drop state
         self.drag_start_index = None
+        self.drag_start_x = None
         self.drag_start_y = None
         self.drag_threshold = 10
         self.is_dragging = False
-        self.drag_data = None
         
         self.image_frames = []
-        self.canvas = None
-        self.scrollable_frame = None
+        self.preview_label = None
+        self.preview_image = None
+        self.grid_frame = None
+        self.grid_canvas = None
+        self.grid_scrollable_frame = None
+        self.grid_scrollbar = None
+        
+        # Grid configuration
+        self.grid_cols = 5  # Number of columns in grid
+        self.grid_icon_size = 120  # Size of grid icons
+        self.grid_padding = 5
+        
+        # Preview pane configuration
+        self.default_preview_height = 400  # Default height for preview pane in pixels
+        self.paned_window = None
+        
         self.create_widgets()
         
     def create_widgets(self):
@@ -71,39 +124,98 @@ class PreviewScreen:
         delete_button.pack(side='right', padx=(0, 10))
         self.delete_button = delete_button
         
-        # Main content area
+        # Main content area - use PanedWindow for resizable panes
         content_frame = ttk.Frame(self.frame)
         content_frame.pack(expand=True, fill='both', padx=10, pady=(0, 10))
         
-        # Instructions
-        instructions = ttk.Label(
-            content_frame,
-            text="Click to select images (Ctrl+click for multiple). Double-click to view full size. Drag to reorder.",
-            font=('Arial', 9),
-            foreground='gray'
+        # Create PanedWindow for resizable splitter
+        self.paned_window = ttk.PanedWindow(content_frame, orient='vertical')
+        self.paned_window.pack(fill='both', expand=True)
+        
+        # Top pane - Preview area (resizable)
+        preview_pane = ttk.LabelFrame(self.paned_window, text="Preview", padding=10)
+        self.paned_window.add(preview_pane, weight=0)
+        
+        # Preview label/display
+        self.preview_label = tk.Label(
+            preview_pane,
+            text="Select a file to see preview",
+            font=('Arial', 12),
+            fg='gray',
+            bg='white',
+            anchor='center'
         )
-        instructions.pack(pady=(0, 10))
+        self.preview_label.pack(expand=True, fill='both')
+        self.preview_image = None
         
-        # Scrollable frame for image previews
-        self.canvas = tk.Canvas(content_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(content_frame, orient='vertical', command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
+        # Bottom pane - Grid area (resizable, takes remaining space)
+        grid_pane = ttk.LabelFrame(self.paned_window, text="Images", padding=5)
+        self.paned_window.add(grid_pane, weight=1)
         
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
+        # Set initial pane sizes and configure minimum sizes
+        def set_initial_pane_size():
+            try:
+                # Get the current height of the paned window
+                paned_height = self.paned_window.winfo_height()
+                #print(paned_height)
+                if paned_height > 1:  # Make sure it's actually rendered
+                    # Set preview pane to default height (but not more than 80% of total)
+                    #print(int(paned_height * 0.8))
+                    #print(self.default_preview_height)
+                    preview_height = min(self.default_preview_height, int(paned_height * 0.8))
+                    self.paned_window.sashpos(0, preview_height)
+            except:
+                pass
         
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=scrollbar.set)
+        # Configure paned window minimum sizes
+        def configure_paned_sizes(event=None):
+            try:
+                # Ensure preview pane doesn't get too small (minimum 200px)
+                current_pos = self.paned_window.sashpos(0)
+                if current_pos < 200:
+                    self.paned_window.sashpos(0, 200)
+            except:
+                pass
         
-        # Bind mouse wheel to canvas
+        # Bind configure event to maintain minimum sizes
+        self.paned_window.bind('<ButtonRelease-1>', configure_paned_sizes)
+        
+        # Scrollable grid frame
+        self.grid_canvas = tk.Canvas(grid_pane, highlightthickness=0)
+        self.grid_scrollbar = ttk.Scrollbar(grid_pane, orient='vertical', command=self.grid_canvas.yview)
+        self.grid_scrollable_frame = tk.Frame(self.grid_canvas, bg='white')
+        
+        canvas_window = self.grid_canvas.create_window((0, 0), window=self.grid_scrollable_frame, anchor="nw")
+        
+        # Make canvas window expand to fill canvas width and update scroll region
+        def configure_canvas_window(event):
+            canvas_width = event.width
+            self.grid_canvas.itemconfig(canvas_window, width=canvas_width)
+            # Use after_idle to update scrollbar visibility after layout
+            self.parent.after_idle(self.update_scrollbar_visibility)
+        
+        def configure_scrollable_frame(event):
+            self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox("all"))
+            # Use after_idle to update scrollbar visibility after layout
+            self.parent.after_idle(self.update_scrollbar_visibility)
+        
+        # Custom scrollbar command
+        def on_scroll(*args):
+            self.grid_scrollbar.set(*args)
+        
+        # Bind canvas configure to resize the window
+        self.grid_canvas.bind('<Configure>', configure_canvas_window)
+        # Bind scrollable frame configure to update scroll region
+        self.grid_scrollable_frame.bind("<Configure>", configure_scrollable_frame)
+        self.grid_canvas.configure(yscrollcommand=on_scroll)
+        
+        # Bind mouse wheel to grid canvas
         def on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        self.canvas.bind("<MouseWheel>", on_mousewheel)
+            self.grid_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self.grid_canvas.bind("<MouseWheel>", on_mousewheel)
         
-        self.canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        self.grid_canvas.pack(side="left", fill="both", expand=True)
+        # Don't pack scrollbar initially - it will be shown when needed
         
         # Bind keyboard events
         self.parent.bind('<Delete>', lambda e: self.delete_selected())
@@ -113,169 +225,266 @@ class PreviewScreen:
         """Update the displayed images."""
         self.images = images
         self.selected_indices = set()
+        self.selected_index = None
         self.create_thumbnails()
         self.refresh_display()
+        self.update_preview()
         
     def create_thumbnails(self):
         """Create thumbnail images for display."""
         self.thumbnails = []
+        self.grid_thumbnails = []
+        
+        # Create preview size thumbnail (larger)
+        preview_size = (400, 400)
+        # Create grid size thumbnails (smaller)
+        grid_size = (self.grid_icon_size - 20, self.grid_icon_size - 40)  # Leave space for label
+        
         for img_path in self.images:
             try:
                 with Image.open(img_path) as img:
                     # Apply EXIF orientation to display image correctly
                     img = ImageOps.exif_transpose(img)
-                    # Create thumbnail
-                    img.thumbnail((50, 50), Image.Resampling.LANCZOS)
-                    # Convert to PhotoImage
-                    photo = ImageTk.PhotoImage(img)
-                    self.thumbnails.append(photo)
+                    
+                    # Create preview thumbnail
+                    preview_img = img.copy()
+                    preview_img.thumbnail(preview_size, Image.Resampling.LANCZOS)
+                    preview_photo = ImageTk.PhotoImage(preview_img)
+                    self.thumbnails.append(preview_photo)
+                    
+                    # Create grid thumbnail
+                    grid_img = img.copy()
+                    grid_img.thumbnail(grid_size, Image.Resampling.LANCZOS)
+                    grid_photo = ImageTk.PhotoImage(grid_img)
+                    self.grid_thumbnails.append(grid_photo)
             except Exception as e:
                 self.debug.info(f"Error creating thumbnail for {img_path}: {e}")
-                # Create a placeholder
-                placeholder_img = Image.new('RGB', (50, 50), color='lightgray')
-                photo = ImageTk.PhotoImage(placeholder_img)
-                self.thumbnails.append(photo)
+                # Create placeholders
+                placeholder_preview = Image.new('RGB', preview_size, color='lightgray')
+                preview_photo = ImageTk.PhotoImage(placeholder_preview)
+                self.thumbnails.append(preview_photo)
+                
+                placeholder_grid = Image.new('RGB', grid_size, color='lightgray')
+                grid_photo = ImageTk.PhotoImage(placeholder_grid)
+                self.grid_thumbnails.append(grid_photo)
                 
     def refresh_display(self):
-        """Refresh the image display."""
+        """Refresh the grid display."""
         self.debug.info(f"Refreshing display. Images: {len(self.images)}, Selected: {self.selected_indices}")
         
         # Clear existing widgets
-        for widget in self.scrollable_frame.winfo_children():
+        for widget in self.grid_scrollable_frame.winfo_children():
             widget.destroy()
         self.image_frames = []
             
-        # Create image frames
-        for i, (img_path, thumbnail) in enumerate(zip(self.images, self.thumbnails)):
-            self.debug.info(f"Creating frame {i} for {os.path.basename(img_path)}")
-            frame = self.create_image_frame(i, img_path, thumbnail)
-            frame.pack(fill='x', padx=5, pady=2)
+        if not self.images:
+            return
+        
+        # Create grid of image frames
+        for i, (img_path, thumbnail) in enumerate(zip(self.images, self.grid_thumbnails)):
+            frame = self.create_grid_item(i, img_path, thumbnail)
             self.image_frames.append(frame)
             
-        self.debug.info(f"Created {len(self.image_frames)} frames")
+        # Layout in grid
+        self.layout_grid()
         
-        # Update canvas scroll region
-        self.scrollable_frame.update_idletasks()
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-            
-    def create_image_frame(self, index, img_path, thumbnail):
-        """Create a frame for displaying an image thumbnail."""
-        is_selected = index in self.selected_indices
+        # Update canvas scroll region and scrollbar visibility
+        self.grid_scrollable_frame.update_idletasks()
+        self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox("all"))
+        # Update scrollbar visibility after layout
+        self.parent.after_idle(self.update_scrollbar_visibility)
+        
+    def layout_grid(self):
+        """Layout image frames in a grid."""
+        row = 0
+        col = 0
+        
+        for i, frame in enumerate(self.image_frames):
+            frame.grid(row=row, column=col, padx=self.grid_padding, pady=self.grid_padding, sticky='nsew')
+            col += 1
+            if col >= self.grid_cols:
+                col = 0
+                row += 1
+        
+        # Configure grid weights
+        for i in range(self.grid_cols):
+            self.grid_scrollable_frame.grid_columnconfigure(i, weight=1)
+        
+    def create_grid_item(self, index, img_path, thumbnail):
+        """Create a grid item frame for displaying an image thumbnail."""
+        is_selected = index == self.selected_index
         
         # Main frame
-        if is_selected:
-            frame = tk.Frame(self.scrollable_frame, relief='solid', borderwidth=2, 
-                           bg='lightblue', highlightbackground='blue', highlightthickness=1)
-        else:
-            frame = tk.Frame(self.scrollable_frame, relief='solid', borderwidth=1, 
-                           bg='white', highlightbackground='gray', highlightthickness=1)
+        frame = tk.Frame(
+            self.grid_scrollable_frame,
+            relief='solid',
+            borderwidth=2 if is_selected else 1,
+            bg='lightblue' if is_selected else 'white',
+            highlightbackground='blue' if is_selected else 'gray',
+            highlightthickness=2 if is_selected else 1,
+            width=self.grid_icon_size,
+            height=self.grid_icon_size + 25
+        )
+        frame.pack_propagate(False)
         
         # Store frame data
         frame.image_index = index
         frame.image_path = img_path
         
-        # Image and info container
-        container = tk.Frame(frame, bg=frame['bg'])
-        container.pack(fill='x', padx=5, pady=5)
+        # Image label
+        img_label = tk.Label(frame, image=thumbnail, bg=frame['bg'])
+        img_label.pack(pady=(5, 2))
+        img_label.image = thumbnail  # Keep a reference
         
-        # Thumbnail label
-        img_label = tk.Label(container, image=thumbnail, bg=frame['bg'])
-        img_label.pack(side='left', padx=(0, 10))
-        
-        # Info frame
-        info_frame = tk.Frame(container, bg=frame['bg'])
-        info_frame.pack(side='left', fill='both', expand=True)
-        
-        # File name
+        # Filename label (truncated if too long)
         filename = os.path.basename(img_path)
-        name_label = tk.Label(info_frame, text=filename, font=('Arial', 10, 'bold'), 
-                             bg=frame['bg'], anchor='w', justify='left')
-        name_label.pack(fill='x', anchor='w')
+        max_length = 20
+        if len(filename) > max_length:
+            display_name = filename[:max_length-3] + "..."
+        else:
+            display_name = filename
+            
+        name_label = tk.Label(
+            frame,
+            text=display_name,
+            font=('Arial', 8),
+            bg=frame['bg'],
+            wraplength=self.grid_icon_size - 10
+        )
+        name_label.pack(padx=2, pady=(0, 5))
         
-        # File path
-        # path_label = tk.Label(info_frame, text=img_path, font=('Arial', 8), 
-        #                      fg='gray', bg=frame['bg'], anchor='w', justify='left')
-        # path_label.pack(fill='x', anchor='w')
+        # Create tooltip
+        def get_tooltip_text():
+            filename = os.path.basename(img_path)
+            dirname = os.path.dirname(img_path)
+            try:
+                file_size = os.path.getsize(img_path)
+                size_str = f"{file_size / 1024:.1f} KB" if file_size < 1024*1024 else f"{file_size / (1024*1024):.1f} MB"
+            except:
+                size_str = "Unknown size"
+            return f"Filename: {filename}\nPath: {dirname}\nSize: {size_str}\nPosition: {index + 1}"
         
-        # Position indicator
-        pos_label = tk.Label(info_frame, text=f"Position: {index + 1}", font=('Arial', 8), 
-                           bg=frame['bg'], anchor='w', justify='left')
-        pos_label.pack(fill='x', anchor='w', pady=(5, 0))
+        tooltip = ToolTip(frame, get_tooltip_text)
         
-        # Bind events - use a more reliable approach
-        self.bind_frame_events(frame, index, img_path)
+        # Bind events
+        def on_enter(event):
+            tooltip.showtip()
+            if not self.is_dragging and index != self.selected_index:
+                frame.configure(bg='#f0f0f0')
+                self.update_frame_bg(frame, '#f0f0f0')
         
-        return frame
-    
-    def bind_frame_events(self, frame, index, img_path):
-        """Bind events to frame and all its children."""
-        widgets_to_bind = []
+        def on_leave(event):
+            tooltip.hidetip()
+            if not self.is_dragging and index != self.selected_index:
+                frame.configure(bg='white')
+                self.update_frame_bg(frame, 'white')
         
-        def collect_widgets(widget):
-            widgets_to_bind.append(widget)
-            for child in widget.winfo_children():
-                collect_widgets(child)
+        def on_click(event):
+            if not self.is_dragging:
+                self.select_image(index)
         
-        collect_widgets(frame)
+        def on_double_click(event):
+            if not self.is_dragging:
+                self.on_view_image(img_path)
         
-        # Bind events to all widgets
-        for widget in widgets_to_bind:
-            # Set cursor
+        def on_press(event):
+            self.drag_start_index = index
+            self.drag_start_x = event.x_root
+            self.drag_start_y = event.y_root
+            self.is_dragging = False
+        
+        def on_drag(event):
+            if self.drag_start_index is None:
+                return
+            
+            if not self.is_dragging:
+                distance = ((event.x_root - self.drag_start_x)**2 + 
+                           (event.y_root - self.drag_start_y)**2)**0.5
+                if distance > self.drag_threshold:
+                    self.start_drag(index)
+        
+        def on_release(event):
+            if self.is_dragging and self.drag_start_index is not None:
+                target_index = self.find_target_index(event.x_root, event.y_root)
+                if target_index is not None and target_index != self.drag_start_index:
+                    self.reorder_images(self.drag_start_index, target_index)
+                self.end_drag()
+            else:
+                self.drag_start_index = None
+        
+        # Bind events to frame and all children
+        for widget in [frame, img_label, name_label]:
+            widget.bind('<Enter>', on_enter)
+            widget.bind('<Leave>', on_leave)
+            widget.bind('<Button-1>', on_click)
+            widget.bind('<Double-Button-1>', on_double_click)
+            widget.bind('<ButtonPress-1>', on_press)
+            widget.bind('<B1-Motion>', on_drag)
+            widget.bind('<ButtonRelease-1>', on_release)
             try:
                 widget.configure(cursor="hand2")
             except:
                 pass
-            
-            # Mouse events for selection and drag/drop
-            widget.bind('<Button-1>', lambda e, idx=index: self.on_mouse_press(e, idx))
-            widget.bind('<Double-Button-1>', lambda e, path=img_path: self.on_double_click(e, path))
-            widget.bind('<B1-Motion>', lambda e, idx=index: self.on_mouse_drag(e, idx))
-            widget.bind('<ButtonRelease-1>', lambda e, idx=index: self.on_mouse_release(e, idx))
-            
-            # Visual feedback
-            widget.bind('<Enter>', lambda e, idx=index: self.on_mouse_enter(e, idx))
-            widget.bind('<Leave>', lambda e, idx=index: self.on_mouse_leave(e, idx))
-    
-    def on_mouse_press(self, event, index):
-        """Handle mouse press."""
-        self.debug.info(f"Mouse press on frame {index}")
         
-        # Store drag start information
-        self.drag_start_index = index
-        self.drag_start_y = event.y_root
-        self.is_dragging = False
-        
-        # Start a timer to differentiate between click and drag
-        self.parent.after(100, lambda: self.check_for_click(index, event.state))
+        return frame
     
-    def check_for_click(self, index, state):
-        """Check if this was a click (not a drag)."""
-        if not self.is_dragging and self.drag_start_index == index:
-            # This was a click, handle selection
-            if state & 0x4:  # Ctrl key pressed
-                self.toggle_selection(index)
-            else:
-                self.selected_indices = {index}
-            self.update_selection_display()
+    def update_frame_bg(self, frame, bg_color):
+        """Update frame background color recursively."""
+        def update_widget(widget):
+            try:
+                widget.configure(bg=bg_color)
+            except:
+                pass
+            for child in widget.winfo_children():
+                update_widget(child)
+        update_widget(frame)
     
-    def on_double_click(self, event, img_path):
-        """Handle double-click to view image."""
-        if not self.is_dragging:
-            self.on_view_image(img_path)
-    
-    def on_mouse_drag(self, event, index):
-        """Handle mouse drag motion."""
-        if self.drag_start_index is None:
+    def select_image(self, index):
+        """Select an image and update preview."""
+        if index < 0 or index >= len(self.images):
             return
-        
-        # Check if we should start dragging
-        if not self.is_dragging:
-            distance = abs(event.y_root - self.drag_start_y)
-            if distance > self.drag_threshold:
-                self.start_drag(index)
-        
-        if self.is_dragging:
-            self.update_drag_visual(event)
+            
+        self.selected_index = index
+        self.selected_indices = {index}
+        self.update_preview()
+        self.refresh_display()  # Refresh to update selection highlight
+        self.update_selection_display()
+    
+    def update_scrollbar_visibility(self):
+        """Show or hide scrollbar based on content height."""
+        try:
+            bbox = self.grid_canvas.bbox("all")
+            if bbox:
+                canvas_height = self.grid_canvas.winfo_height()
+                content_height = bbox[3] - bbox[1]
+                if content_height > canvas_height and canvas_height > 0:
+                    # Show scrollbar
+                    if not self.grid_scrollbar.winfo_viewable():
+                        self.grid_scrollbar.pack(side="right", fill="y")
+                else:
+                    # Hide scrollbar
+                    if self.grid_scrollbar.winfo_viewable():
+                        self.grid_scrollbar.pack_forget()
+        except:
+            pass
+    
+    def update_preview(self):
+        """Update the preview pane with selected image."""
+        if self.selected_index is not None and self.selected_index < len(self.thumbnails):
+            # Show selected image
+            self.preview_label.configure(image=self.thumbnails[self.selected_index], text='')
+            self.preview_label.image = self.thumbnails[self.selected_index]  # Keep reference
+        else:
+            # Show placeholder text
+            self.preview_label.configure(image='', text="Select a file to see preview")
+            self.preview_image = None
+    
+    def update_selection_display(self):
+        """Update the visual display of selections."""
+        if self.selected_index is not None:
+            self.delete_button['state'] = 'normal'
+        else:
+            self.delete_button['state'] = 'disabled'
     
     def start_drag(self, index):
         """Start the drag operation."""
@@ -285,7 +494,7 @@ class PreviewScreen:
         # Change cursor for all frames
         for frame in self.image_frames:
             try:
-                self.set_cursor_recursive(frame, "sb_v_double_arrow")
+                self.set_cursor_recursive(frame, "hand2")
             except:
                 pass
     
@@ -298,32 +507,66 @@ class PreviewScreen:
         for child in widget.winfo_children():
             self.set_cursor_recursive(child, cursor)
     
-    def update_drag_visual(self, event):
-        """Update visual feedback during drag."""
-        # Find which frame we're over
-        target_index = self.find_target_index(event.y_root)
-        if target_index is not None and target_index != self.drag_start_index:
-            # Could add visual feedback here (highlight target area)
-            pass
-    
-    def on_mouse_release(self, event, index):
-        """Handle mouse release."""
-        if self.is_dragging and self.drag_start_index is not None:
-            # Complete the drag operation
-            target_index = self.find_target_index(event.y_root)
-            
-            if target_index is not None and target_index != self.drag_start_index:
-                self.debug.info(f"Dropping frame {self.drag_start_index} at position {target_index}")
-                self.reorder_images(self.drag_start_index, target_index)
-            else:
-                self.debug.info("Drag cancelled or dropped at same position")
+    def find_target_index(self, x_root, y_root):
+        """Find the target index for dropping based on coordinates."""
+        if not self.image_frames:
+            return None
         
-        # Reset drag state
-        self.end_drag()
+        try:
+            # Convert screen coordinates to canvas coordinates
+            canvas_x = x_root - self.grid_canvas.winfo_rootx()
+            canvas_y = y_root - self.grid_canvas.winfo_rooty()
+            
+            # Account for scroll position
+            scroll_top = self.grid_canvas.yview()[0]
+            canvas_height = self.grid_canvas.winfo_height()
+            scroll_region = self.grid_canvas.cget('scrollregion')
+            if scroll_region:
+                scroll_region_height = int(scroll_region.split()[3]) or canvas_height
+                actual_y = canvas_y + (scroll_top * scroll_region_height)
+            else:
+                actual_y = canvas_y
+            
+            # Find which grid cell this corresponds to by checking frame positions
+            # This is more reliable than calculating from dimensions
+            best_index = None
+            min_distance = float('inf')
+            
+            for i, frame in enumerate(self.image_frames):
+                try:
+                    frame_x = frame.winfo_x()
+                    frame_y = frame.winfo_y()
+                    frame_width = frame.winfo_width()
+                    frame_height = frame.winfo_height()
+                    
+                    # Check if point is within frame bounds
+                    frame_center_x = frame_x + frame_width / 2
+                    frame_center_y = frame_y + frame_height / 2
+                    
+                    # Convert to canvas coordinates
+                    frame_canvas_y = frame_y + (scroll_top * (scroll_region_height if scroll_region else canvas_height))
+                    
+                    # Calculate distance from click point
+                    dist_x = abs(canvas_x - (frame_x + frame_width / 2))
+                    dist_y = abs(actual_y - (frame_canvas_y + frame_height / 2))
+                    distance = (dist_x**2 + dist_y**2)**0.5
+                    
+                    if distance < min_distance:
+                        min_distance = distance
+                        best_index = i
+                except:
+                    continue
+            
+            return best_index if best_index is not None else len(self.image_frames) - 1
+            
+        except Exception as e:
+            self.debug.info(f"Error finding target index: {e}")
+            return None
     
     def end_drag(self):
         """End the drag operation."""
         self.drag_start_index = None
+        self.drag_start_x = None
         self.drag_start_y = None
         self.is_dragging = False
         
@@ -333,91 +576,6 @@ class PreviewScreen:
                 self.set_cursor_recursive(frame, "hand2")
             except:
                 pass
-    
-    def find_target_index(self, y_root):
-        """Find the target index for dropping based on Y coordinate."""
-        if not self.image_frames:
-            return None
-        
-        # Convert screen coordinate to canvas coordinate
-        try:
-            canvas_y = y_root - self.canvas.winfo_rooty()
-            
-            # Account for scroll position
-            scroll_top, scroll_bottom = self.canvas.yview()
-            canvas_height = self.canvas.winfo_height()
-            scroll_region_height = int(self.canvas.cget('scrollregion').split()[3]) or canvas_height
-            
-            # Calculate actual Y position in the scrollable content
-            actual_y = canvas_y + (scroll_top * scroll_region_height)
-            
-            # Find which frame this Y position corresponds to
-            current_y = 0
-            for i, frame in enumerate(self.image_frames):
-                try:
-                    frame_height = frame.winfo_reqheight() + 4  # +4 for pady
-                    if actual_y <= current_y + frame_height / 2:
-                        return i
-                    current_y += frame_height
-                except:
-                    continue
-            
-            # If we're past all frames, return the last index + 1
-            return len(self.image_frames) - 1
-            
-        except Exception as e:
-            self.debug.info(f"Error finding target index: {e}")
-            return None
-    
-    def on_mouse_enter(self, event, index):
-        """Handle mouse enter for visual feedback."""
-        if not self.is_dragging and index not in self.selected_indices:
-            frame = self.image_frames[index]
-            self.update_frame_bg(frame, '#f0f0f0')
-    
-    def on_mouse_leave(self, event, index):
-        """Handle mouse leave for visual feedback."""
-        if not self.is_dragging and index not in self.selected_indices:
-            frame = self.image_frames[index]
-            self.update_frame_bg(frame, 'white')
-    
-    def update_frame_bg(self, frame, bg_color):
-        """Update frame background color."""
-        def update_widget(widget):
-            try:
-                widget.configure(bg=bg_color)
-            except:
-                pass
-            for child in widget.winfo_children():
-                update_widget(child)
-        
-        update_widget(frame)
-            
-    def update_selection_display(self):
-        """Update the visual display of selections."""
-        if self.selected_indices:
-            self.debug.info('Enabling delete button')
-            self.delete_button['state'] = 'normal' 
-        else:
-            self.debug.info('Disabling delete button')
-            self.delete_button['state'] = 'disabled'
-        for i, frame in enumerate(self.image_frames):
-            if i in self.selected_indices:
-                frame.configure(bg='lightblue', highlightbackground='blue', highlightthickness=2)
-                self.update_frame_bg(frame, 'lightblue')
-            else:
-                frame.configure(bg='white', highlightbackground='gray', highlightthickness=1)
-                self.update_frame_bg(frame, 'white')
-    
-    def toggle_selection(self, index):
-        """Toggle selection of an image."""
-        self.debug.info(f"Toggling selection for index {index}")
-        if index in self.selected_indices:
-            self.selected_indices.remove(index)
-        else:
-            self.selected_indices.add(index)
-
-        self.debug.info(f"New selection: {self.selected_indices}")
     
     def reorder_images(self, from_index, to_index):
         """Reorder images by moving from_index to to_index."""
@@ -436,51 +594,75 @@ class PreviewScreen:
         thumb = self.thumbnails.pop(from_index)
         self.thumbnails.insert(to_index, thumb)
         
-        # Update selection indices
-        new_selected = set()
-        for idx in self.selected_indices:
-            if idx == from_index:
-                new_selected.add(to_index)
-            elif from_index < to_index:
-                if from_index < idx <= to_index:
-                    new_selected.add(idx - 1)
-                else:
-                    new_selected.add(idx)
-            else:  # from_index > to_index
-                if to_index <= idx < from_index:
-                    new_selected.add(idx + 1)
-                else:
-                    new_selected.add(idx)
-        self.selected_indices = new_selected
+        # Move in grid thumbnails list
+        grid_thumb = self.grid_thumbnails.pop(from_index)
+        self.grid_thumbnails.insert(to_index, grid_thumb)
         
-        self.debug.info(f"Reorder complete. New selection: {self.selected_indices}")
+        # Update selection
+        if self.selected_index is not None:
+            if self.selected_index == from_index:
+                self.selected_index = to_index
+            elif from_index < to_index:
+                if from_index < self.selected_index <= to_index:
+                    self.selected_index -= 1
+            else:  # from_index > to_index
+                if to_index <= self.selected_index < from_index:
+                    self.selected_index += 1
+        
+        self.selected_indices = {self.selected_index} if self.selected_index is not None else set()
+        
+        self.debug.info(f"Reorder complete. New selected index: {self.selected_index}")
         if self.on_reorder_images:
             self.on_reorder_images(self.images.copy())
         self.refresh_display()
-        
+        self.update_preview()
+    
     def delete_selected(self):
         """Delete selected images."""
-        if not self.selected_indices:
-            tk.messagebox.showinfo("No Selection", "Please select some images to delete first.\n\nClick on images to select them (they will turn blue).")
+        if self.selected_index is None:
+            tk.messagebox.showinfo("No Selection", "Please select an image to delete first.")
             return
             
-        indices_to_delete = sorted(list(self.selected_indices), reverse=True)
+        indices_to_delete = [self.selected_index]
         self.on_delete_images(indices_to_delete)
-            
+    
     def select_all(self):
-        """Select all images."""
-        self.selected_indices = set(range(len(self.images)))
+        """Select all images (selects first one for preview)."""
+        if self.images:
+            self.selected_index = 0
+            self.selected_indices = {0}
+            self.update_preview()
         self.update_selection_display()
-        
+        self.refresh_display()
+    
     def clear_selection(self):
         """Clear all selections."""
         self.selected_indices = set()
+        self.selected_index = None
+        self.update_preview()
         self.update_selection_display()
-        
+        self.refresh_display()
+    
     def show(self):
         """Show the preview screen."""
         self.frame.pack(expand=True, fill='both')
         self.parent.focus_set()
+        
+        # Set initial pane size after screen is displayed
+        def set_size_after_layout():
+            try:
+                # Get the current height of the paned window
+                paned_height = self.paned_window.winfo_height()
+                if paned_height > 1:  # Make sure it's actually rendered
+                    # Set preview pane to default height (but not more than 80% of total)
+                    preview_height = min(self.default_preview_height, int(paned_height * 0.8))
+                    self.paned_window.sashpos(0, preview_height)
+            except:
+                pass
+        
+        # Schedule to set initial size after layout is complete
+        self.parent.after(100, set_size_after_layout)
+        self.parent.after(300, set_size_after_layout)  # Backup in case first one is too early
         
         # Bind keyboard events
         self.parent.bind('<Delete>', self.on_delete_key)
