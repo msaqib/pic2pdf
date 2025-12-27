@@ -132,7 +132,7 @@ class PreviewScreen:
             except Exception as e:
                 self.debug.info(f"Error creating thumbnail for {img_path}: {e}")
                 # Create a placeholder
-                placeholder_img = Image.new('RGB', (150, 150), color='lightgray')
+                placeholder_img = Image.new('RGB', (50, 50), color='lightgray')
                 photo = ImageTk.PhotoImage(placeholder_img)
                 self.thumbnails.append(photo)
                 
