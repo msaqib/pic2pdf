@@ -32,6 +32,9 @@ class PreviewScreen:
         self.drag_start_y = None
         self.drag_threshold = 10
         self.is_dragging = False
+        self.drag_ghost_window = None  # Floating window for drag animation
+        self.drag_ghost_label = None
+        self.drag_target_index = None  # Current target index for drop indicator
         
         self.image_frames = []
         self.preview_label = None
@@ -46,8 +49,8 @@ class PreviewScreen:
         self.status_bar = None
         
         # Grid configuration
-        self.grid_cols = 5  # Number of columns in grid
-        self.grid_icon_size = 120  # Size of grid icons
+        self.grid_cols = 5  # Number of columns in grid (will be calculated dynamically)
+        self.grid_icon_size = 120  # Size of grid icons (fixed width)
         self.grid_padding = 5
         
         # Preview pane configuration
@@ -218,6 +221,14 @@ class PreviewScreen:
         def configure_canvas_window(event):
             canvas_width = event.width
             self.grid_canvas.itemconfig(canvas_window, width=canvas_width)
+            # Recalculate grid columns and relayout if we have frames
+            if self.image_frames:
+                old_cols = self.grid_cols
+                self.grid_cols = self.calculate_grid_cols(canvas_width)
+                if old_cols != self.grid_cols:
+                    self.layout_grid()
+                    self.grid_scrollable_frame.update_idletasks()
+                    self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox("all"))
             # Use after_idle to update scrollbar visibility after layout
             self.parent.after_idle(self.update_scrollbar_visibility)
         
@@ -367,21 +378,49 @@ class PreviewScreen:
         # Update scrollbar visibility after layout
         self.parent.after_idle(self.update_scrollbar_visibility)
         
+    def calculate_grid_cols(self, canvas_width=None):
+        """Calculate number of columns that fit in the available width."""
+        if canvas_width is None:
+            try:
+                canvas_width = self.grid_canvas.winfo_width()
+                if canvas_width <= 1:
+                    # Canvas not yet sized, use a default
+                    return 5
+            except:
+                return 5
+        
+        # Calculate how many icons fit: (width - padding) / (icon_size + 2*padding)
+        # Each column takes: icon_size + 2*padding (left and right padding)
+        available_width = canvas_width - (2 * self.grid_padding)  # Account for outer padding
+        icon_with_padding = self.grid_icon_size + (2 * self.grid_padding)
+        cols = max(1, int(available_width / icon_with_padding))
+        return cols
+    
     def layout_grid(self):
         """Layout image frames in a grid."""
+        # Calculate columns based on current canvas width
+        if self.image_frames:
+            canvas_width = self.grid_canvas.winfo_width()
+            if canvas_width <= 1:
+                # Canvas not yet sized, use previous value or default
+                if self.grid_cols < 1:
+                    self.grid_cols = 5
+            else:
+                self.grid_cols = self.calculate_grid_cols(canvas_width)
+        
         row = 0
         col = 0
         
         for i, frame in enumerate(self.image_frames):
-            frame.grid(row=row, column=col, padx=self.grid_padding, pady=self.grid_padding, sticky='nsew')
+            frame.grid(row=row, column=col, padx=self.grid_padding, pady=self.grid_padding, sticky='nw')
             col += 1
             if col >= self.grid_cols:
                 col = 0
                 row += 1
         
-        # Configure grid weights
+        # Configure grid columns - no weight so they don't stretch, fixed minsize
         for i in range(self.grid_cols):
-            self.grid_scrollable_frame.grid_columnconfigure(i, weight=1)
+            self.grid_scrollable_frame.grid_columnconfigure(i, weight=0, minsize=self.grid_icon_size + (2 * self.grid_padding))
         
     def create_grid_item(self, index, img_path, thumbnail):
         """Create a grid item frame for displaying an image thumbnail."""
@@ -398,7 +437,8 @@ class PreviewScreen:
             width=self.grid_icon_size,
             height=self.grid_icon_size + 25
         )
-        frame.pack_propagate(False)
+        frame.pack_propagate(False)  # Prevent frame from shrinking below its size
+        frame.grid_propagate(False)  # Prevent frame from resizing in grid layout
         
         # Store frame data
         frame.image_index = index
@@ -469,6 +509,29 @@ class PreviewScreen:
                            (event.y_root - self.drag_start_y)**2)**0.5
                 if distance > self.drag_threshold:
                     self.start_drag(index)
+            
+            # Update ghost window position to follow mouse
+            if self.is_dragging and self.drag_ghost_window:
+                try:
+                    # Center the ghost window on the mouse cursor
+                    # Use requested width/height as fallback
+                    ghost_width = self.drag_ghost_window.winfo_reqwidth()
+                    ghost_height = self.drag_ghost_window.winfo_reqheight()
+                    if ghost_width <= 1:
+                        ghost_width = self.grid_icon_size
+                    if ghost_height <= 1:
+                        ghost_height = self.grid_icon_size + 25
+                    
+                    x = event.x_root - ghost_width // 2
+                    y = event.y_root - ghost_height // 2
+                    self.drag_ghost_window.geometry(f"+{x}+{y}")
+                except Exception as e:
+                    self.debug.info(f"Error updating ghost window position: {e}")
+                    pass
+                
+                # Update drop target indicator
+                target_index = self.find_target_index(event.x_root, event.y_root)
+                self.update_drop_indicator(target_index)
         
         def on_release(event):
             if self.is_dragging and self.drag_start_index is not None:
@@ -649,7 +712,69 @@ class PreviewScreen:
     def start_drag(self, index):
         """Start the drag operation."""
         self.is_dragging = True
+        self.drag_target_index = None  # Initialize drop target
         self.debug.info(f"Started dragging frame {index}")
+        
+        # Create floating ghost window that follows the mouse
+        if index < len(self.image_frames):
+            source_frame = self.image_frames[index]
+            
+            # Get frame position and size
+            try:
+                frame_x = source_frame.winfo_rootx()
+                frame_y = source_frame.winfo_rooty()
+                frame_width = source_frame.winfo_width()
+                frame_height = source_frame.winfo_height()
+            except:
+                frame_width = self.grid_icon_size
+                frame_height = self.grid_icon_size + 25
+                frame_x = 0
+                frame_y = 0
+            
+            # Create floating window
+            self.drag_ghost_window = tk.Toplevel(self.parent)
+            self.drag_ghost_window.wm_overrideredirect(True)
+            self.drag_ghost_window.wm_attributes('-topmost', True)
+            try:
+                self.drag_ghost_window.wm_attributes('-alpha', 0.8)  # Semi-transparent (may not work on all systems)
+            except:
+                pass  # Alpha may not be supported on all systems
+            
+            # Copy the frame content to the ghost window
+            ghost_frame = tk.Frame(
+                self.drag_ghost_window,
+                relief='solid',
+                borderwidth=2,
+                bg='lightblue',
+                highlightbackground='blue',
+                highlightthickness=2,
+                width=frame_width,
+                height=frame_height
+            )
+            ghost_frame.pack(fill='both', expand=True)
+            ghost_frame.pack_propagate(False)
+            
+            # Copy image thumbnail
+            if index < len(self.grid_thumbnails):
+                img_label = tk.Label(ghost_frame, image=self.grid_thumbnails[index], bg='lightblue')
+                img_label.image = self.grid_thumbnails[index]  # Keep reference
+                img_label.pack(pady=(5, 2))
+                
+                # Copy filename
+                filename = os.path.basename(self.images[index])
+                max_length = 20
+                display_name = filename[:max_length-3] + "..." if len(filename) > max_length else filename
+                name_label = tk.Label(
+                    ghost_frame,
+                    text=display_name,
+                    font=('Arial', 8),
+                    bg='lightblue',
+                    wraplength=self.grid_icon_size - 10
+                )
+                name_label.pack(padx=2, pady=(0, 5))
+            
+            # Position ghost window at current mouse position (offset to center on cursor)
+            self.drag_ghost_window.geometry(f"{frame_width}x{frame_height}+{frame_x}+{frame_y}")
         
         # Change cursor for all frames
         for frame in self.image_frames:
@@ -723,8 +848,98 @@ class PreviewScreen:
             self.debug.info(f"Error finding target index: {e}")
             return None
     
+    def update_drop_indicator(self, target_index):
+        """Update visual indicator for drop target."""
+        # Clear previous indicator
+        if self.drag_target_index is not None and self.drag_target_index < len(self.image_frames):
+            prev_frame = self.image_frames[self.drag_target_index]
+            prev_index = prev_frame.image_index
+            
+            # Restore original appearance (white or lightblue if selected)
+            if prev_index == self.selected_index:
+                prev_frame.configure(
+                    bg='lightblue',
+                    highlightbackground='blue',
+                    highlightthickness=2,
+                    borderwidth=2
+                )
+                self.update_frame_bg(prev_frame, 'lightblue')
+            else:
+                prev_frame.configure(
+                    bg='white',
+                    highlightbackground='gray',
+                    highlightthickness=1,
+                    borderwidth=1
+                )
+                self.update_frame_bg(prev_frame, 'white')
+        
+        # Set new indicator
+        if target_index is not None and target_index < len(self.image_frames):
+            # Don't highlight if it's the source frame
+            if target_index != self.drag_start_index:
+                target_frame = self.image_frames[target_index]
+                # Use different color if target is selected
+                if target_frame.image_index == self.selected_index:
+                    target_frame.configure(
+                        bg='#e6e6fa',  # Light lavender (yellow + blue mix)
+                        highlightbackground='orange',
+                        highlightthickness=2,
+                        borderwidth=2
+                    )
+                    self.update_frame_bg(target_frame, '#e6e6fa')
+                else:
+                    target_frame.configure(
+                        bg='#fffacd',  # Light yellow
+                        highlightbackground='orange',
+                        highlightthickness=2,
+                        borderwidth=2
+                    )
+                    self.update_frame_bg(target_frame, '#fffacd')
+        else:
+            target_index = None
+        
+        self.drag_target_index = target_index
+    
+    def clear_drop_indicator(self):
+        """Clear the drop indicator."""
+        if self.drag_target_index is not None and self.drag_target_index < len(self.image_frames):
+            target_frame = self.image_frames[self.drag_target_index]
+            target_index = target_frame.image_index
+            
+            # Restore original appearance (white or lightblue if selected)
+            if target_index == self.selected_index:
+                target_frame.configure(
+                    bg='lightblue',
+                    highlightbackground='blue',
+                    highlightthickness=2,
+                    borderwidth=2
+                )
+                self.update_frame_bg(target_frame, 'lightblue')
+            else:
+                target_frame.configure(
+                    bg='white',
+                    highlightbackground='gray',
+                    highlightthickness=1,
+                    borderwidth=1
+                )
+                self.update_frame_bg(target_frame, 'white')
+        self.drag_target_index = None
+    
     def end_drag(self):
         """End the drag operation."""
+        # Clear drop indicator
+        self.clear_drop_indicator()
+        
+        # Destroy ghost window
+        if self.drag_ghost_window:
+            try:
+                self.drag_ghost_window.destroy()
+            except:
+                pass
+            self.drag_ghost_window = None
+            self.drag_ghost_label = None
+        
+        # Reset drag state
         self.drag_start_index = None
         self.drag_start_x = None
         self.drag_start_y = None
