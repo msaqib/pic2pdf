@@ -2,7 +2,7 @@
 """
 Image to PDF Converter - Main Application Entry Point
 """
-
+# Hello world
 import sys
 import os
 import logging

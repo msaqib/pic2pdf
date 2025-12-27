@@ -4,7 +4,7 @@ Full Size Image Viewer for Image to PDF Converter
 
 import tkinter as tk
 from tkinter import ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 
 class ImageViewer:
     """Full size image viewer with zoom and pan capabilities."""
@@ -24,8 +24,9 @@ class ImageViewer:
         self.window.transient(parent)
         self.window.grab_set()
         
-        # Load image
-        self.original_image = Image.open(image_path)
+        # Load image and apply EXIF orientation
+        img = Image.open(image_path)
+        self.original_image = ImageOps.exif_transpose(img)
         self.current_image = self.original_image.copy()
         
         self.create_widgets()

@@ -1,3 +1,7 @@
 buid/
 dist/
 image-to-pdf-env/
+src/__pycache__/
+gui/__pycache__/
+models/__pycache__/
+utils/__pycache__/
