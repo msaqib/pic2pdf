@@ -1,7 +1,7 @@
 """
 Preview Screen UI for Image to PDF Converter
 """
-
+# This is a comment
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk, ImageOps
@@ -132,7 +132,7 @@ class PreviewScreen:
             except Exception as e:
                 self.debug.info(f"Error creating thumbnail for {img_path}: {e}")
                 # Create a placeholder
-                placeholder_img = Image.new('RGB', (150, 150), color='lightgray')
+                placeholder_img = Image.new('RGB', (50, 50), color='lightgray')
                 photo = ImageTk.PhotoImage(placeholder_img)
                 self.thumbnails.append(photo)
                 
