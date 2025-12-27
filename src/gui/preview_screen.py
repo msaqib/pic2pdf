@@ -125,7 +125,7 @@ class PreviewScreen:
                     # Apply EXIF orientation to display image correctly
                     img = ImageOps.exif_transpose(img)
                     # Create thumbnail
-                    img.thumbnail((150, 150), Image.Resampling.LANCZOS)
+                    img.thumbnail((50, 50), Image.Resampling.LANCZOS)
                     # Convert to PhotoImage
                     photo = ImageTk.PhotoImage(img)
                     self.thumbnails.append(photo)
