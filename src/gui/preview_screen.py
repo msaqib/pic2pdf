@@ -7,43 +7,6 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk, ImageOps
 import os
 
-class ToolTip:
-    """Tooltip widget for displaying file information on hover."""
-    
-    def __init__(self, widget, text_func):
-        self.widget = widget
-        self.text_func = text_func
-        self.tipwindow = None
-        self.id = None
-        self.x = self.y = 0
-        
-    def showtip(self):
-        """Display text in tooltip window."""
-        text = self.text_func()
-        if not text:
-            return
-            
-        self.x, self.y, cx, cy = self.widget.bbox("insert") if hasattr(self.widget, 'bbox') else (0, 0, 0, 0)
-        self.x += self.widget.winfo_rootx() + 25
-        self.y += self.widget.winfo_rooty() + 20
-        
-        self.tipwindow = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry("+%d+%d" % (self.x, self.y))
-        
-        label = tk.Label(tw, text=text, justify='left',
-                        background="#ffffe0", relief='solid', borderwidth=1,
-                        font=("tahoma", "8", "normal"), wraplength=400)
-        label.pack(ipadx=1)
-        
-    def hidetip(self):
-        """Hide tooltip window."""
-        tw = self.tipwindow
-        self.tipwindow = None
-        if tw:
-            tw.destroy()
-
-
 class PreviewScreen:
     """Preview screen that displays selected images and allows reordering."""
     
@@ -77,6 +40,7 @@ class PreviewScreen:
         self.grid_canvas = None
         self.grid_scrollable_frame = None
         self.grid_scrollbar = None
+        self.status_bar = None
         
         # Grid configuration
         self.grid_cols = 5  # Number of columns in grid
@@ -126,7 +90,7 @@ class PreviewScreen:
         
         # Main content area - use PanedWindow for resizable panes
         content_frame = ttk.Frame(self.frame)
-        content_frame.pack(expand=True, fill='both', padx=10, pady=(0, 10))
+        content_frame.pack(expand=True, fill='both', padx=10, pady=(0, 0))
         
         # Create PanedWindow for resizable splitter
         self.paned_window = ttk.PanedWindow(content_frame, orient='vertical')
@@ -244,6 +208,20 @@ class PreviewScreen:
         
         self.grid_canvas.pack(side="left", fill="both", expand=True)
         # Don't pack scrollbar initially - it will be shown when needed
+        
+        # Status bar at the bottom
+        status_frame = tk.Frame(self.frame, relief='sunken', borderwidth=1)
+        status_frame.pack(fill='x', side='bottom', padx=10, pady=(5, 10))
+        
+        self.status_bar = tk.Label(
+            status_frame,
+            text="Ready",
+            font=('Arial', 9),
+            anchor='w',
+            bg='#f0f0f0',
+            fg='black'
+        )
+        self.status_bar.pack(fill='x', padx=5, pady=2)
         
         # Bind keyboard events
         self.parent.bind('<Delete>', lambda e: self.delete_selected())
@@ -381,8 +359,8 @@ class PreviewScreen:
         )
         name_label.pack(padx=2, pady=(0, 5))
         
-        # Create tooltip
-        def get_tooltip_text():
+        # Function to get status bar text
+        def get_status_text():
             filename = os.path.basename(img_path)
             dirname = os.path.dirname(img_path)
             try:
@@ -390,19 +368,21 @@ class PreviewScreen:
                 size_str = f"{file_size / 1024:.1f} KB" if file_size < 1024*1024 else f"{file_size / (1024*1024):.1f} MB"
             except:
                 size_str = "Unknown size"
-            return f"Filename: {filename}\nPath: {dirname}\nSize: {size_str}\nPosition: {index + 1}"
-        
-        tooltip = ToolTip(frame, get_tooltip_text)
+            return f"Filename: {filename}  |  Path: {dirname}  |  Size: {size_str}  |  Position: {index + 1}"
         
         # Bind events
         def on_enter(event):
-            tooltip.showtip()
+            # Update status bar with file information
+            if self.status_bar:
+                self.status_bar.config(text=get_status_text())
             if not self.is_dragging and index != self.selected_index:
                 frame.configure(bg='#f0f0f0')
                 self.update_frame_bg(frame, '#f0f0f0')
         
         def on_leave(event):
-            tooltip.hidetip()
+            # Clear status bar
+            if self.status_bar:
+                self.status_bar.config(text="Ready")
             if not self.is_dragging and index != self.selected_index:
                 frame.configure(bg='white')
                 self.update_frame_bg(frame, 'white')
