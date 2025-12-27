@@ -35,7 +35,10 @@ class PreviewScreen:
         
         self.image_frames = []
         self.preview_label = None
+        self.preview_canvas = None
         self.preview_image = None
+        self.preview_original_images = []  # Store original images for zoom
+        self.preview_zoom_factor = 1.0  # Current zoom level
         self.grid_frame = None
         self.grid_canvas = None
         self.grid_scrollable_frame = None
@@ -100,17 +103,76 @@ class PreviewScreen:
         preview_pane = ttk.LabelFrame(self.paned_window, text="Preview", padding=10)
         self.paned_window.add(preview_pane, weight=0)
         
-        # Preview label/display
+        # Preview canvas with scrollbars for zoom/pan
+        preview_container = tk.Frame(preview_pane, bg='white')
+        preview_container.pack(expand=True, fill='both')
+        self.preview_container = preview_container  # Store reference
+        
+        # Canvas for preview with zoom support
+        self.preview_canvas = tk.Canvas(preview_container, bg='white', highlightthickness=0)
+        preview_v_scrollbar = ttk.Scrollbar(preview_container, orient='vertical', command=self.preview_canvas.yview)
+        preview_h_scrollbar = ttk.Scrollbar(preview_container, orient='horizontal', command=self.preview_canvas.xview)
+        
+        self.preview_canvas.configure(
+            yscrollcommand=preview_v_scrollbar.set,
+            xscrollcommand=preview_h_scrollbar.set
+        )
+        
+        preview_v_scrollbar.pack(side='right', fill='y')
+        preview_h_scrollbar.pack(side='bottom', fill='x')
+        self.preview_canvas.pack(side='left', fill='both', expand=True)
+        
+        # Preview label for placeholder text (when no image selected)
         self.preview_label = tk.Label(
-            preview_pane,
+            self.preview_canvas,
             text="Select a file to see preview",
             font=('Arial', 12),
             fg='gray',
-            bg='white',
-            anchor='center'
+            bg='white'
         )
-        self.preview_label.pack(expand=True, fill='both')
         self.preview_image = None
+        self.preview_image_id = None
+        
+        # Bind mouse wheel for zooming (Ctrl+Wheel for zoom, regular wheel for pan if zoomed)
+        def on_preview_wheel(event):
+            if event.state & 0x4:  # Ctrl key pressed - zoom
+                self.zoom_preview(event.delta, event)
+            else:
+                # Regular scrolling when zoomed in
+                if self.preview_zoom_factor > 1.0:
+                    if event.delta < 0:
+                        self.preview_canvas.yview_scroll(3, "units")
+                    else:
+                        self.preview_canvas.yview_scroll(-3, "units")
+        
+        self.preview_canvas.bind("<MouseWheel>", on_preview_wheel)
+        self.preview_container.bind("<MouseWheel>", lambda e: on_preview_wheel(e))
+        
+        # Pan support (drag to move when zoomed)
+        self.preview_pan_start_x = None
+        self.preview_pan_start_y = None
+        
+        def on_preview_press(event):
+            if self.preview_zoom_factor > 1.0:
+                self.preview_canvas.scan_mark(event.x, event.y)
+                self.preview_pan_start_x = event.x
+                self.preview_pan_start_y = event.y
+        
+        def on_preview_drag(event):
+            if self.preview_zoom_factor > 1.0 and self.preview_pan_start_x is not None:
+                self.preview_canvas.scan_dragto(event.x, event.y, gain=1)
+        
+        self.preview_canvas.bind('<Button-1>', on_preview_press)
+        self.preview_canvas.bind('<B1-Motion>', on_preview_drag)
+        
+        # Handle canvas resize to update image display
+        def on_preview_canvas_configure(event):
+            if self.selected_index is not None and self.selected_index < len(self.preview_original_images):
+                original_img = self.preview_original_images[self.selected_index]
+                if original_img:
+                    self.display_preview_image(original_img)
+        
+        self.preview_canvas.bind('<Configure>', on_preview_canvas_configure)
         
         # Bottom pane - Grid area (resizable, takes remaining space)
         grid_pane = ttk.LabelFrame(self.paned_window, text="Images", padding=5)
@@ -240,8 +302,9 @@ class PreviewScreen:
         """Create thumbnail images for display."""
         self.thumbnails = []
         self.grid_thumbnails = []
+        self.preview_original_images = []
         
-        # Create preview size thumbnail (larger)
+        # Create preview size thumbnail (larger) - for initial display
         preview_size = (400, 400)
         # Create grid size thumbnails (smaller)
         grid_size = (self.grid_icon_size - 20, self.grid_icon_size - 40)  # Leave space for label
@@ -252,7 +315,10 @@ class PreviewScreen:
                     # Apply EXIF orientation to display image correctly
                     img = ImageOps.exif_transpose(img)
                     
-                    # Create preview thumbnail
+                    # Store original image for zoom
+                    self.preview_original_images.append(img.copy())
+                    
+                    # Create preview thumbnail (initial display size)
                     preview_img = img.copy()
                     preview_img.thumbnail(preview_size, Image.Resampling.LANCZOS)
                     preview_photo = ImageTk.PhotoImage(preview_img)
@@ -269,6 +335,7 @@ class PreviewScreen:
                 placeholder_preview = Image.new('RGB', preview_size, color='lightgray')
                 preview_photo = ImageTk.PhotoImage(placeholder_preview)
                 self.thumbnails.append(preview_photo)
+                self.preview_original_images.append(None)
                 
                 placeholder_grid = Image.new('RGB', grid_size, color='lightgray')
                 grid_photo = ImageTk.PhotoImage(placeholder_grid)
@@ -387,14 +454,6 @@ class PreviewScreen:
                 frame.configure(bg='white')
                 self.update_frame_bg(frame, 'white')
         
-        def on_click(event):
-            if not self.is_dragging:
-                self.select_image(index)
-        
-        def on_double_click(event):
-            if not self.is_dragging:
-                self.on_view_image(img_path)
-        
         def on_press(event):
             self.drag_start_index = index
             self.drag_start_x = event.x_root
@@ -413,12 +472,23 @@ class PreviewScreen:
         
         def on_release(event):
             if self.is_dragging and self.drag_start_index is not None:
+                # Was dragging - complete drag operation
                 target_index = self.find_target_index(event.x_root, event.y_root)
                 if target_index is not None and target_index != self.drag_start_index:
                     self.reorder_images(self.drag_start_index, target_index)
                 self.end_drag()
-            else:
-                self.drag_start_index = None
+            elif self.drag_start_index == index:
+                # Was a click (not a drag) - select the image
+                self.select_image(index)
+            self.drag_start_index = None
+        
+        def on_click(event):
+            # Single click - handled in on_release
+            pass
+        
+        def on_double_click(event):
+            if not self.is_dragging:
+                self.on_view_image(img_path)
         
         # Bind events to frame and all children
         for widget in [frame, img_label, name_label]:
@@ -478,14 +548,96 @@ class PreviewScreen:
     
     def update_preview(self):
         """Update the preview pane with selected image."""
-        if self.selected_index is not None and self.selected_index < len(self.thumbnails):
-            # Show selected image
-            self.preview_label.configure(image=self.thumbnails[self.selected_index], text='')
-            self.preview_label.image = self.thumbnails[self.selected_index]  # Keep reference
+        # Reset zoom when changing images
+        self.preview_zoom_factor = 1.0
+        
+        if self.selected_index is not None and self.selected_index < len(self.preview_original_images):
+            # Show selected image on canvas
+            original_img = self.preview_original_images[self.selected_index]
+            if original_img:
+                self.display_preview_image(original_img)
+            else:
+                self.show_preview_placeholder()
         else:
             # Show placeholder text
-            self.preview_label.configure(image='', text="Select a file to see preview")
-            self.preview_image = None
+            self.show_preview_placeholder()
+    
+    def show_preview_placeholder(self):
+        """Show placeholder text in preview."""
+        self.preview_canvas.delete("all")
+        self.preview_image_id = None
+        self.preview_image = None
+        # Center the label
+        self.preview_label.place(relx=0.5, rely=0.5, anchor='center')
+        self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
+    
+    def display_preview_image(self, img):
+        """Display image in preview canvas with current zoom."""
+        # Hide placeholder label
+        self.preview_label.place_forget()
+        
+        # Calculate display size based on zoom
+        canvas_width = self.preview_canvas.winfo_width()
+        canvas_height = self.preview_canvas.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            # Canvas not sized yet, use default
+            canvas_width = 400
+            canvas_height = 400
+        
+        # Calculate size to fit canvas with zoom
+        img_width, img_height = img.size
+        scale_x = (canvas_width * 0.95) / img_width
+        scale_y = (canvas_height * 0.95) / img_height
+        initial_scale = min(scale_x, scale_y, 1.0)  # Don't scale up initially
+        
+        # Apply zoom factor
+        display_scale = initial_scale * self.preview_zoom_factor
+        
+        # Limit zoom range
+        display_scale = max(0.1, min(display_scale, 5.0))
+        
+        # Resize image
+        new_width = int(img_width * display_scale)
+        new_height = int(img_height * display_scale)
+        
+        display_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        photo = ImageTk.PhotoImage(display_img)
+        
+        # Update canvas
+        self.preview_canvas.delete("all")
+        self.preview_image_id = self.preview_canvas.create_image(
+            canvas_width // 2, 
+            canvas_height // 2, 
+            anchor='center', 
+            image=photo
+        )
+        self.preview_image = photo  # Keep reference
+        self.preview_canvas.configure(scrollregion=self.preview_canvas.bbox("all"))
+    
+    def zoom_preview(self, delta, event=None):
+        """Zoom the preview image."""
+        if self.selected_index is None or self.selected_index >= len(self.preview_original_images):
+            return
+        
+        original_img = self.preview_original_images[self.selected_index]
+        if not original_img:
+            return
+        
+        # Calculate zoom step (smaller steps for smoother zooming)
+        zoom_step = 0.1 if abs(delta) < 120 else 0.2
+        
+        # Determine zoom direction
+        if delta > 0:
+            self.preview_zoom_factor *= (1 + zoom_step)
+        else:
+            self.preview_zoom_factor *= (1 - zoom_step)
+        
+        # Limit zoom range
+        self.preview_zoom_factor = max(0.1, min(self.preview_zoom_factor, 5.0))
+        
+        # Update display
+        self.display_preview_image(original_img)
     
     def update_selection_display(self):
         """Update the visual display of selections."""
