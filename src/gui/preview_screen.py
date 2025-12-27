@@ -273,6 +273,9 @@ class PreviewScreen:
                 units = int(-delta / 120)
             self.grid_canvas.yview_scroll(units, "units")
         
+        # Store the mouse wheel handler so it can be bound to icon frames
+        self.grid_mousewheel_handler = on_mousewheel
+        
         # Bind to canvas
         self.grid_canvas.bind("<MouseWheel>", on_mousewheel)
         # Also bind to parent frame and scrollable frame for better trackpad support on Windows
@@ -562,6 +565,9 @@ class PreviewScreen:
             widget.bind('<ButtonPress-1>', on_press)
             widget.bind('<B1-Motion>', on_drag)
             widget.bind('<ButtonRelease-1>', on_release)
+            # Bind mouse wheel events to allow scrolling when hovering over icons
+            if hasattr(self, 'grid_mousewheel_handler'):
+                widget.bind('<MouseWheel>', self.grid_mousewheel_handler)
             try:
                 widget.configure(cursor="hand2")
             except:
