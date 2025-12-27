@@ -1,7 +1,7 @@
 """
 Preview Screen UI for Image to PDF Converter
 """
-
+# This is a comment
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk, ImageOps
