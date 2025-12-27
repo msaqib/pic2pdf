@@ -151,6 +151,7 @@ class PreviewScreen:
         # Bottom pane - Grid area (resizable, takes remaining space)
         grid_pane = ttk.LabelFrame(self.paned_window, text="Images", padding=5)
         self.paned_window.add(grid_pane, weight=1)
+        self.grid_pane = grid_pane  # Store reference for event binding
         
         # Set initial pane sizes and configure minimum sizes
         def set_initial_pane_size():
@@ -209,10 +210,37 @@ class PreviewScreen:
         self.grid_scrollable_frame.bind("<Configure>", configure_scrollable_frame)
         self.grid_canvas.configure(yscrollcommand=on_scroll)
         
-        # Bind mouse wheel to grid canvas
+        # Bind mouse wheel to grid canvas and parent frame for trackpad support
         def on_mousewheel(event):
-            self.grid_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            # Only allow scrolling if scrollbar is visible (content exceeds canvas height)
+            try:
+                bbox = self.grid_canvas.bbox("all")
+                if bbox:
+                    canvas_height = self.grid_canvas.winfo_height()
+                    content_height = bbox[3] - bbox[1]
+                    # If content fits in canvas, don't scroll
+                    if content_height <= canvas_height:
+                        return
+            except:
+                pass
+            
+            # Handle both mouse wheel (delta in multiples of 120) and trackpad (smaller deltas)
+            # On Windows, delta is typically 120 per "notch", but trackpads can send smaller values
+            delta = event.delta
+            # Normalize delta (some trackpads send values that aren't multiples of 120)
+            if abs(delta) < 120:
+                # Trackpad or fine scrolling - scroll by pixels
+                units = -delta // 1
+            else:
+                # Mouse wheel - scroll by units (each unit is typically 3 lines)
+                units = int(-delta / 120)
+            self.grid_canvas.yview_scroll(units, "units")
+        
+        # Bind to canvas
         self.grid_canvas.bind("<MouseWheel>", on_mousewheel)
+        # Also bind to parent frame and scrollable frame for better trackpad support on Windows
+        self.grid_pane.bind("<MouseWheel>", lambda e: on_mousewheel(e))
+        self.grid_scrollable_frame.bind("<MouseWheel>", lambda e: on_mousewheel(e))
         
         self.grid_canvas.pack(side="left", fill="both", expand=True)
         # Don't pack scrollbar initially - it will be shown when needed
