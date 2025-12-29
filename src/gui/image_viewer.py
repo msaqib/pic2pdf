@@ -6,6 +6,21 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk, ImageOps
 
+# Import color scheme
+try:
+    from .preview_screen import Colors, Fonts
+except ImportError:
+    # Fallback if import fails
+    class Colors:
+        BG_PRIMARY = '#FAFBFC'
+        BG_SECONDARY = '#F8F9FA'
+        BG_PREVIEW = '#F9FAFB'
+        TEXT_PRIMARY = '#111827'
+        TEXT_SECONDARY = '#6B7280'
+    class Fonts:
+        BODY = ('Segoe UI', 'Helvetica Neue', 'Arial', 10, 'normal')
+        SMALL = ('Segoe UI', 'Helvetica Neue', 'Arial', 9, 'normal')
+
 class ImageViewer:
     """Full size image viewer with zoom and pan capabilities."""
     
@@ -37,34 +52,52 @@ class ImageViewer:
         
     def create_widgets(self):
         """Create the viewer widgets."""
-        # Toolbar
-        toolbar = ttk.Frame(self.window)
-        toolbar.pack(fill='x', padx=5, pady=5)
+        # Toolbar with modern styling
+        toolbar = tk.Frame(self.window, bg=Colors.BG_SECONDARY, relief='flat', height=50)
+        toolbar.pack(fill='x', padx=0, pady=0)
+        toolbar.pack_propagate(False)
+        
+        toolbar_inner = ttk.Frame(toolbar)
+        toolbar_inner.pack(fill='both', expand=True, padx=12, pady=10)
         
         # Close button
         close_button = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="✕ Close",
             command=self.close
         )
-        close_button.pack(side='left')
+        close_button.pack(side='left', padx=(0, 12))
         
         # Zoom controls
-        ttk.Label(toolbar, text="Zoom:").pack(side='left', padx=(20, 5))
+        zoom_label = tk.Label(
+            toolbar_inner,
+            text="Zoom:",
+            font=Fonts.SMALL,
+            bg=Colors.BG_SECONDARY,
+            fg=Colors.TEXT_SECONDARY
+        )
+        zoom_label.pack(side='left', padx=(12, 5))
         
         zoom_out_btn = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="−",
             command=self.zoom_out,
             width=3
         )
         zoom_out_btn.pack(side='left')
         
-        self.zoom_label = ttk.Label(toolbar, text="100%")
+        self.zoom_label = tk.Label(
+            toolbar_inner,
+            text="100%",
+            font=Fonts.SMALL,
+            bg=Colors.BG_SECONDARY,
+            fg=Colors.TEXT_PRIMARY,
+            width=5
+        )
         self.zoom_label.pack(side='left', padx=5)
         
         zoom_in_btn = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="+",
             command=self.zoom_in,
             width=3
@@ -72,7 +105,7 @@ class ImageViewer:
         zoom_in_btn.pack(side='left')
         
         reset_zoom_btn = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="Reset",
             command=self.reset_zoom
         )
@@ -80,18 +113,18 @@ class ImageViewer:
         
         # Fit to window button
         fit_button = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="Fit to Window",
             command=self.fit_to_window
         )
-        fit_button.pack(side='left', padx=(10, 0))
+        fit_button.pack(side='left', padx=(12, 0))
         
         # Main canvas with scrollbars
         main_frame = ttk.Frame(self.window)
-        main_frame.pack(expand=True, fill='both', padx=5, pady=(0, 5))
+        main_frame.pack(expand=True, fill='both', padx=8, pady=(0, 8))
         
         # Canvas
-        self.canvas = tk.Canvas(main_frame, bg='white')
+        self.canvas = tk.Canvas(main_frame, bg=Colors.BG_PREVIEW, highlightthickness=0)
         
         # Scrollbars
         v_scrollbar = ttk.Scrollbar(main_frame, orient='vertical', command=self.canvas.yview)
@@ -181,7 +214,8 @@ class ImageViewer:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         
         # Update zoom label
-        self.zoom_label.config(text=f"{int(self.zoom_factor * 100)}%")
+        if hasattr(self, 'zoom_label'):
+            self.zoom_label.config(text=f"{int(self.zoom_factor * 100)}%")
         
     def zoom_in(self):
         """Zoom in on the image."""

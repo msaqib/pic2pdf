@@ -4,8 +4,136 @@ Preview Screen UI for Image to PDF Converter
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from PIL import Image, ImageTk, ImageOps
+from PIL import Image, ImageTk, ImageOps, ImageDraw, ImageFont
 import os
+import threading
+
+# Modern color scheme
+class Colors:
+    """Modern color palette for the application."""
+    # Backgrounds
+    BG_PRIMARY = '#FAFBFC'  # Main background
+    BG_SECONDARY = '#F8F9FA'  # Secondary background
+    BG_PREVIEW = '#F9FAFB'  # Preview pane background
+    BG_CARD = '#FFFFFF'  # Card/icon background
+    BG_HOVER = '#F3F4F6'  # Hover state
+    BG_SELECTED = '#EBF4FF'  # Selected state (light blue)
+    BG_STATUS = '#F5F6FA'  # Status bar background
+    
+    # Accent colors
+    ACCENT_PRIMARY = '#2563EB'  # Primary blue
+    ACCENT_SECONDARY = '#3B82F6'  # Secondary blue
+    ACCENT_DROP = '#FEF3C7'  # Drop indicator (light yellow)
+    ACCENT_DROP_BORDER = '#F59E0B'  # Drop indicator border (amber)
+    
+    # Text colors
+    TEXT_PRIMARY = '#111827'  # Primary text (dark gray)
+    TEXT_SECONDARY = '#6B7280'  # Secondary text (medium gray)
+    TEXT_TERTIARY = '#9CA3AF'  # Tertiary text (light gray)
+    TEXT_PLACEHOLDER = '#9CA3AF'  # Placeholder text
+    
+    # Borders
+    BORDER_LIGHT = '#E5E7EB'  # Light border
+    BORDER_MEDIUM = '#D1D5DB'  # Medium border
+    BORDER_SELECTED = '#2563EB'  # Selected border (blue)
+    
+    # Status bar
+    STATUS_BG = '#F5F6FA'
+    STATUS_BORDER = '#E5E7EB'
+
+# Font configuration
+class Fonts:
+    """Font configuration for consistent typography."""
+    SYSTEM_FONTS = ('Segoe UI', 'Helvetica Neue', 'Arial', 'sans-serif')
+    
+    TITLE = (SYSTEM_FONTS, 18, 'bold')
+    SUBTITLE = (SYSTEM_FONTS, 10, 'normal')
+    BODY = (SYSTEM_FONTS, 10, 'normal')
+    SMALL = (SYSTEM_FONTS, 9, 'normal')
+    TINY = (SYSTEM_FONTS, 8, 'normal')
+    MONOSPACE = ('Consolas', 'Courier New', 'monospace')
+
+def create_icon_image(unicode_char, size=20, color='#111827'):
+    """Create an icon image from a Unicode character with colored circular background."""
+    # Create a transparent image with some padding
+    padding = 2
+    img_size = size + padding * 2
+    img = Image.new('RGBA', (img_size, img_size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Convert hex color to RGB tuple
+    if color.startswith('#'):
+        rgb_color = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+    else:
+        rgb_color = (17, 24, 39)  # Default dark gray
+    
+    font_size = int(size * 0.70)  # Slightly smaller to fit in circle
+    font = None
+    
+    # Try different fonts that support emoji
+    font_paths = [
+        "C:/Windows/Fonts/seguiemj.ttf",  # Windows emoji font
+        "seguiemj.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "arial.ttf",
+    ]
+    
+    for font_path in font_paths:
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+            break
+        except:
+            continue
+    
+    # If no font found, try default
+    if font is None:
+        try:
+            font = ImageFont.load_default()
+        except:
+            font = None
+    
+    # Get text bounding box first to properly center
+    text_bbox = None
+    text_width = 0
+    text_height = 0
+    if font:
+        try:
+            text_bbox = draw.textbbox((0, 0), unicode_char, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+        except:
+            pass
+    
+    # Calculate center position for text
+    center_x = img_size // 2
+    center_y = img_size // 2
+    
+    # Draw a colored circular background centered on the image
+    circle_padding = 1
+    circle_size = size - 2  # Make circle slightly smaller than image size
+    circle_x1 = center_x - circle_size // 2
+    circle_y1 = center_y - circle_size // 2
+    circle_x2 = center_x + circle_size // 2
+    circle_y2 = center_y + circle_size // 2
+    draw.ellipse(
+        [circle_x1, circle_y1, circle_x2, circle_y2],
+        fill=rgb_color + (230,),  # Add alpha channel for slight transparency
+        outline=rgb_color + (255,)
+    )
+    
+    # Try to render the Unicode character (emoji) centered
+    if font and text_bbox:
+        try:
+            # Center the text on the image
+            x = center_x - (text_width // 2) - text_bbox[0]
+            y = center_y - (text_height // 2) - text_bbox[1]
+            # Note: PIL might not support colored emoji, they render in their native colors
+            draw.text((x, y), unicode_char, font=font)
+        except Exception as e:
+            # If rendering fails, the colored circle will still be visible
+            pass
+    
+    return ImageTk.PhotoImage(img)
 
 class PreviewScreen:
     """Preview screen that displays selected images and allows reordering."""
@@ -47,6 +175,8 @@ class PreviewScreen:
         self.grid_scrollable_frame = None
         self.grid_scrollbar = None
         self.status_bar = None
+        self.loading_frame = None  # Loading indicator frame
+        self.loading_label = None  # Loading label
         
         # Grid configuration
         self.grid_cols = 5  # Number of columns in grid (will be calculated dynamically)
@@ -61,42 +191,63 @@ class PreviewScreen:
         
     def create_widgets(self):
         """Create the preview screen widgets."""
-        self.frame = ttk.Frame(self.parent)
+        self.frame = ttk.Frame(self.parent, style='Card.TFrame')
         
-        # Top toolbar
-        toolbar = ttk.Frame(self.frame)
-        toolbar.pack(fill='x', padx=10, pady=10)
+        # Configure styles
+        style = ttk.Style()
+        style.configure('Card.TFrame', background=Colors.BG_PRIMARY)
+        style.configure('Toolbar.TFrame', background=Colors.BG_SECONDARY, relief='flat')
+        
+        # Top toolbar with modern styling
+        toolbar = tk.Frame(self.frame, bg=Colors.BG_SECONDARY, relief='flat', height=60)
+        toolbar.pack(fill='x', padx=0, pady=0)
+        toolbar.pack_propagate(False)
+        
+        # Inner toolbar frame for padding
+        toolbar_inner = ttk.Frame(toolbar)
+        toolbar_inner.pack(fill='both', expand=True, padx=16, pady=12)
+        
+        # Create icon images (larger than text) with different colors
+        icon_size = 20
+        self.folder_icon = create_icon_image('📁', size=icon_size, color='#10B981')  # Green
+        self.pdf_icon = create_icon_image('📄', size=icon_size, color='#EF4444')  # Red
+        self.delete_icon = create_icon_image('🗑️', size=icon_size, color='#6B7280')  # Gray
         
         # Select files button
         select_button = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="Select input files...",
+            image=self.folder_icon,
+            compound='left',
             command=self.on_select_files
         )
-        select_button.pack(side='left', padx=(0, 10))
+        select_button.pack(side='left', padx=(0, 12))
         
-        # Create PDF button
+        # Create PDF button (primary action)
         pdf_button = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="Create PDF...",
+            image=self.pdf_icon,
+            compound='left',
             command=self.on_create_pdf,
-            style='Accent.TButton',
         )
         pdf_button.pack(side='right')
         
         # Delete button
         delete_button = ttk.Button(
-            toolbar,
+            toolbar_inner,
             text="Delete Selected",
+            image=self.delete_icon,
+            compound='left',
             command=self.delete_selected,
             state='disabled',            
         )
-        delete_button.pack(side='right', padx=(0, 10))
+        delete_button.pack(side='right', padx=(0, 12))
         self.delete_button = delete_button
         
         # Main content area - use PanedWindow for resizable panes
         content_frame = ttk.Frame(self.frame)
-        content_frame.pack(expand=True, fill='both', padx=10, pady=(0, 0))
+        content_frame.pack(expand=True, fill='both', padx=16, pady=(0, 0))
         
         # Create PanedWindow for resizable splitter
         self.paned_window = ttk.PanedWindow(content_frame, orient='vertical')
@@ -107,12 +258,12 @@ class PreviewScreen:
         self.paned_window.add(preview_pane, weight=0)
         
         # Preview canvas with scrollbars for zoom/pan
-        preview_container = tk.Frame(preview_pane, bg='white')
-        preview_container.pack(expand=True, fill='both')
+        preview_container = tk.Frame(preview_pane, bg=Colors.BG_PREVIEW)
+        preview_container.pack(expand=True, fill='both', padx=8, pady=8)
         self.preview_container = preview_container  # Store reference
         
         # Canvas for preview with zoom support
-        self.preview_canvas = tk.Canvas(preview_container, bg='white', highlightthickness=0)
+        self.preview_canvas = tk.Canvas(preview_container, bg=Colors.BG_PREVIEW, highlightthickness=0)
         preview_v_scrollbar = ttk.Scrollbar(preview_container, orient='vertical', command=self.preview_canvas.yview)
         preview_h_scrollbar = ttk.Scrollbar(preview_container, orient='horizontal', command=self.preview_canvas.xview)
         
@@ -129,9 +280,9 @@ class PreviewScreen:
         self.preview_label = tk.Label(
             self.preview_canvas,
             text="Select a file to see preview",
-            font=('Arial', 12),
-            fg='gray',
-            bg='white'
+            font=Fonts.BODY,
+            fg=Colors.TEXT_TERTIARY,
+            bg=Colors.BG_PREVIEW
         )
         self.preview_image = None
         self.preview_image_id = None
@@ -211,9 +362,9 @@ class PreviewScreen:
         self.paned_window.bind('<ButtonRelease-1>', configure_paned_sizes)
         
         # Scrollable grid frame
-        self.grid_canvas = tk.Canvas(grid_pane, highlightthickness=0)
+        self.grid_canvas = tk.Canvas(grid_pane, highlightthickness=0, bg=Colors.BG_PRIMARY)
         self.grid_scrollbar = ttk.Scrollbar(grid_pane, orient='vertical', command=self.grid_canvas.yview)
-        self.grid_scrollable_frame = tk.Frame(self.grid_canvas, bg='white')
+        self.grid_scrollable_frame = tk.Frame(self.grid_canvas, bg=Colors.BG_PRIMARY)
         
         canvas_window = self.grid_canvas.create_window((0, 0), window=self.grid_scrollable_frame, anchor="nw")
         
@@ -285,19 +436,45 @@ class PreviewScreen:
         self.grid_canvas.pack(side="left", fill="both", expand=True)
         # Don't pack scrollbar initially - it will be shown when needed
         
-        # Status bar at the bottom
-        status_frame = tk.Frame(self.frame, relief='sunken', borderwidth=1)
-        status_frame.pack(fill='x', side='bottom', padx=10, pady=(5, 10))
+        # Status bar at the bottom with modern styling
+        status_frame = tk.Frame(
+            self.frame, 
+            bg=Colors.STATUS_BG,
+            relief='flat',
+            borderwidth=0,
+            height=28
+        )
+        status_frame.pack(fill='x', side='bottom', padx=0, pady=0)
+        status_frame.pack_propagate(False)
+        
+        # Top border line
+        border_line = tk.Frame(status_frame, bg=Colors.STATUS_BORDER, height=1)
+        border_line.pack(fill='x', side='top')
+        
+        # Status content frame
+        status_content = tk.Frame(status_frame, bg=Colors.STATUS_BG)
+        status_content.pack(fill='both', expand=True, padx=16, pady=6)
         
         self.status_bar = tk.Label(
-            status_frame,
+            status_content,
             text="Ready",
-            font=('Arial', 9),
+            font=Fonts.SMALL,
             anchor='w',
-            bg='#f0f0f0',
-            fg='black'
+            bg=Colors.STATUS_BG,
+            fg=Colors.TEXT_SECONDARY
         )
-        self.status_bar.pack(fill='x', padx=5, pady=2)
+        self.status_bar.pack(side='left', fill='x', expand=True)
+        
+        # File count label (right side of status bar)
+        self.status_count = tk.Label(
+            status_content,
+            text="",
+            font=Fonts.SMALL,
+            anchor='e',
+            bg=Colors.STATUS_BG,
+            fg=Colors.TEXT_TERTIARY
+        )
+        self.status_count.pack(side='right', padx=(12, 0))
         
         # Bind keyboard events
         self.parent.bind('<Delete>', lambda e: self.delete_selected())
@@ -308,9 +485,77 @@ class PreviewScreen:
         self.images = images
         self.selected_indices = set()
         self.selected_index = None
-        self.create_thumbnails()
+        
+        # Show loading indicator
+        self.show_loading_indicator()
+        
+        # Create thumbnails in background thread to avoid blocking UI
+        def create_thumbnails_thread():
+            self.create_thumbnails()
+            # Schedule UI update on main thread
+            self.parent.after(0, self.on_thumbnails_created)
+        
+        thread = threading.Thread(target=create_thumbnails_thread, daemon=True)
+        thread.start()
+    
+    def on_thumbnails_created(self):
+        """Called after thumbnails are created to update UI."""
+        self.hide_loading_indicator()
         self.refresh_display()
         self.update_preview()
+        self.update_status_count()
+        
+    def show_loading_indicator(self):
+        """Show loading indicator while generating previews."""
+        if self.loading_frame:
+            return  # Already showing
+        
+        # Create loading overlay on grid canvas (more reliable than scrollable_frame)
+        if self.grid_canvas:
+            self.loading_frame = tk.Frame(
+                self.grid_canvas,
+                bg=Colors.BG_PRIMARY
+            )
+            # Place in center of canvas
+            self.loading_frame.place(relx=0.5, rely=0.5, anchor='center')
+            
+            # Loading label with animation dots
+            self.loading_label = tk.Label(
+                self.loading_frame,
+                text="Generating previews...",
+                font=Fonts.BODY,
+                fg=Colors.TEXT_SECONDARY,
+                bg=Colors.BG_PRIMARY
+            )
+            self.loading_label.pack(pady=20)
+            
+            # Animate loading dots
+            self.animate_loading_dots()
+    
+    def animate_loading_dots(self, count=0):
+        """Animate loading dots."""
+        if not self.loading_label:
+            return
+        dots = '.' * ((count % 3) + 1)
+        self.loading_label.config(text=f"Generating previews{dots}")
+        if self.loading_frame:
+            self.parent.after(500, lambda: self.animate_loading_dots(count + 1))
+    
+    def hide_loading_indicator(self):
+        """Hide loading indicator."""
+        if self.loading_frame:
+            self.loading_frame.destroy()
+            self.loading_frame = None
+            self.loading_label = None
+    
+    def update_status_count(self):
+        """Update file count in status bar."""
+        if self.status_count and self.images:
+            count = len(self.images)
+            file_text = "file" if count == 1 else "files"
+            self.status_count.config(text=f"{count} {file_text}")
+        elif self.status_count:
+            self.status_count.config(text="")
         
     def create_thumbnails(self):
         """Create thumbnail images for display."""
@@ -346,12 +591,12 @@ class PreviewScreen:
             except Exception as e:
                 self.debug.info(f"Error creating thumbnail for {img_path}: {e}")
                 # Create placeholders
-                placeholder_preview = Image.new('RGB', preview_size, color='lightgray')
+                placeholder_preview = Image.new('RGB', preview_size, color=Colors.BG_HOVER)
                 preview_photo = ImageTk.PhotoImage(placeholder_preview)
                 self.thumbnails.append(preview_photo)
                 self.preview_original_images.append(None)
                 
-                placeholder_grid = Image.new('RGB', grid_size, color='lightgray')
+                placeholder_grid = Image.new('RGB', grid_size, color=Colors.BG_HOVER)
                 grid_photo = ImageTk.PhotoImage(placeholder_grid)
                 self.grid_thumbnails.append(grid_photo)
                 
@@ -380,6 +625,7 @@ class PreviewScreen:
         self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox("all"))
         # Update scrollbar visibility after layout
         self.parent.after_idle(self.update_scrollbar_visibility)
+        self.update_status_count()
         
     def calculate_grid_cols(self, canvas_width=None):
         """Calculate number of columns that fit in the available width."""
@@ -408,7 +654,7 @@ class PreviewScreen:
                 # Canvas not yet sized, use previous value or default
                 if self.grid_cols < 1:
                     self.grid_cols = 5
-            else:
+        else:
                 self.grid_cols = self.calculate_grid_cols(canvas_width)
         
         row = 0
@@ -429,13 +675,13 @@ class PreviewScreen:
         """Create a grid item frame for displaying an image thumbnail."""
         is_selected = index == self.selected_index
         
-        # Main frame
+        # Main frame with modern styling
         frame = tk.Frame(
             self.grid_scrollable_frame,
-            relief='solid',
-            borderwidth=2 if is_selected else 1,
-            bg='lightblue' if is_selected else 'white',
-            highlightbackground='blue' if is_selected else 'gray',
+            relief='flat',
+            borderwidth=0,
+            bg=Colors.BG_SELECTED if is_selected else Colors.BG_CARD,
+            highlightbackground=Colors.BORDER_SELECTED if is_selected else Colors.BORDER_LIGHT,
             highlightthickness=2 if is_selected else 1,
             width=self.grid_icon_size,
             height=self.grid_icon_size + 25
@@ -463,8 +709,9 @@ class PreviewScreen:
         name_label = tk.Label(
             frame,
             text=display_name,
-            font=('Arial', 8),
+            font=Fonts.TINY,
             bg=frame['bg'],
+            fg=Colors.TEXT_PRIMARY,
             wraplength=self.grid_icon_size - 10
         )
         name_label.pack(padx=2, pady=(0, 5))
@@ -486,16 +733,16 @@ class PreviewScreen:
             if self.status_bar:
                 self.status_bar.config(text=get_status_text())
             if not self.is_dragging and index != self.selected_index:
-                frame.configure(bg='#f0f0f0')
-                self.update_frame_bg(frame, '#f0f0f0')
+                frame.configure(bg=Colors.BG_HOVER, highlightbackground=Colors.BORDER_MEDIUM)
+                self.update_frame_bg(frame, Colors.BG_HOVER)
         
         def on_leave(event):
             # Clear status bar
             if self.status_bar:
                 self.status_bar.config(text="Ready")
             if not self.is_dragging and index != self.selected_index:
-                frame.configure(bg='white')
-                self.update_frame_bg(frame, 'white')
+                frame.configure(bg=Colors.BG_CARD, highlightbackground=Colors.BORDER_LIGHT)
+                self.update_frame_bg(frame, Colors.BG_CARD)
         
         def on_press(event):
             self.drag_start_index = index
@@ -572,7 +819,7 @@ class PreviewScreen:
                 widget.configure(cursor="hand2")
             except:
                 pass
-        
+            
         return frame
     
     def update_frame_bg(self, frame, bg_color):
@@ -749,10 +996,10 @@ class PreviewScreen:
             # Copy the frame content to the ghost window
             ghost_frame = tk.Frame(
                 self.drag_ghost_window,
-                relief='solid',
-                borderwidth=2,
-                bg='lightblue',
-                highlightbackground='blue',
+                relief='flat',
+                borderwidth=0,
+                bg=Colors.BG_SELECTED,
+                highlightbackground=Colors.BORDER_SELECTED,
                 highlightthickness=2,
                 width=frame_width,
                 height=frame_height
@@ -762,7 +1009,7 @@ class PreviewScreen:
             
             # Copy image thumbnail
             if index < len(self.grid_thumbnails):
-                img_label = tk.Label(ghost_frame, image=self.grid_thumbnails[index], bg='lightblue')
+                img_label = tk.Label(ghost_frame, image=self.grid_thumbnails[index], bg=Colors.BG_SELECTED)
                 img_label.image = self.grid_thumbnails[index]  # Keep reference
                 img_label.pack(pady=(5, 2))
                 
@@ -773,8 +1020,9 @@ class PreviewScreen:
                 name_label = tk.Label(
                     ghost_frame,
                     text=display_name,
-                    font=('Arial', 8),
-                    bg='lightblue',
+                    font=Fonts.TINY,
+                    bg=Colors.BG_SELECTED,
+                    fg=Colors.TEXT_PRIMARY,
                     wraplength=self.grid_icon_size - 10
                 )
                 name_label.pack(padx=2, pady=(0, 5))
@@ -861,23 +1109,23 @@ class PreviewScreen:
             prev_frame = self.image_frames[self.drag_target_index]
             prev_index = prev_frame.image_index
             
-            # Restore original appearance (white or lightblue if selected)
+            # Restore original appearance
             if prev_index == self.selected_index:
                 prev_frame.configure(
-                    bg='lightblue',
-                    highlightbackground='blue',
+                    bg=Colors.BG_SELECTED,
+                    highlightbackground=Colors.BORDER_SELECTED,
                     highlightthickness=2,
-                    borderwidth=2
+                    borderwidth=0
                 )
-                self.update_frame_bg(prev_frame, 'lightblue')
+                self.update_frame_bg(prev_frame, Colors.BG_SELECTED)
             else:
                 prev_frame.configure(
-                    bg='white',
-                    highlightbackground='gray',
+                    bg=Colors.BG_CARD,
+                    highlightbackground=Colors.BORDER_LIGHT,
                     highlightthickness=1,
-                    borderwidth=1
+                    borderwidth=0
                 )
-                self.update_frame_bg(prev_frame, 'white')
+                self.update_frame_bg(prev_frame, Colors.BG_CARD)
         
         # Set new indicator
         if target_index is not None and target_index < len(self.image_frames):
@@ -887,20 +1135,20 @@ class PreviewScreen:
                 # Use different color if target is selected
                 if target_frame.image_index == self.selected_index:
                     target_frame.configure(
-                        bg='#e6e6fa',  # Light lavender (yellow + blue mix)
-                        highlightbackground='orange',
+                        bg=Colors.ACCENT_DROP,
+                        highlightbackground=Colors.ACCENT_DROP_BORDER,
                         highlightthickness=2,
-                        borderwidth=2
+                        borderwidth=0
                     )
-                    self.update_frame_bg(target_frame, '#e6e6fa')
+                    self.update_frame_bg(target_frame, Colors.ACCENT_DROP)
                 else:
                     target_frame.configure(
-                        bg='#fffacd',  # Light yellow
-                        highlightbackground='orange',
+                        bg=Colors.ACCENT_DROP,
+                        highlightbackground=Colors.ACCENT_DROP_BORDER,
                         highlightthickness=2,
-                        borderwidth=2
+                        borderwidth=0
                     )
-                    self.update_frame_bg(target_frame, '#fffacd')
+                    self.update_frame_bg(target_frame, Colors.ACCENT_DROP)
         else:
             target_index = None
         
@@ -912,23 +1160,23 @@ class PreviewScreen:
             target_frame = self.image_frames[self.drag_target_index]
             target_index = target_frame.image_index
             
-            # Restore original appearance (white or lightblue if selected)
+            # Restore original appearance
             if target_index == self.selected_index:
                 target_frame.configure(
-                    bg='lightblue',
-                    highlightbackground='blue',
+                    bg=Colors.BG_SELECTED,
+                    highlightbackground=Colors.BORDER_SELECTED,
                     highlightthickness=2,
-                    borderwidth=2
+                    borderwidth=0
                 )
-                self.update_frame_bg(target_frame, 'lightblue')
+                self.update_frame_bg(target_frame, Colors.BG_SELECTED)
             else:
                 target_frame.configure(
-                    bg='white',
-                    highlightbackground='gray',
+                    bg=Colors.BG_CARD,
+                    highlightbackground=Colors.BORDER_LIGHT,
                     highlightthickness=1,
-                    borderwidth=1
+                    borderwidth=0
                 )
-                self.update_frame_bg(target_frame, 'white')
+                self.update_frame_bg(target_frame, Colors.BG_CARD)
         self.drag_target_index = None
     
     def end_drag(self):
@@ -997,7 +1245,7 @@ class PreviewScreen:
             self.on_reorder_images(self.images.copy())
         self.refresh_display()
         self.update_preview()
-    
+        
     def delete_selected(self):
         """Delete selected images."""
         if self.selected_index is None:
@@ -1006,7 +1254,7 @@ class PreviewScreen:
             
         indices_to_delete = [self.selected_index]
         self.on_delete_images(indices_to_delete)
-    
+            
     def select_all(self):
         """Select all images (selects first one for preview)."""
         if self.images:
@@ -1015,7 +1263,7 @@ class PreviewScreen:
             self.update_preview()
         self.update_selection_display()
         self.refresh_display()
-    
+        
     def clear_selection(self):
         """Clear all selections."""
         self.selected_indices = set()
@@ -1023,7 +1271,7 @@ class PreviewScreen:
         self.update_preview()
         self.update_selection_display()
         self.refresh_display()
-    
+        
     def show(self):
         """Show the preview screen."""
         self.frame.pack(expand=True, fill='both')
